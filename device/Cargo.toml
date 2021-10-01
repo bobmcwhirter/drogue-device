@@ -55,7 +55,7 @@ embassy = { version = "0.1.0", features = ["std", "time", "time-tick-1mhz"]}
 drogue-device-macros = { path = "../macros" }
 futures = { version = "0.3", default-features = false, features = ["executor"] }
 arrayvec = { version = "0.6" }
-env_logger = "0.8"
+env_logger = "0.9"
 
 [features]
 default = [ "std", "log", "time" ]

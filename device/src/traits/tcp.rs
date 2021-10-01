@@ -35,7 +35,7 @@ pub trait TcpSocket {
 }
 
 pub trait TcpStack {
-    type SocketHandle: Copy;
+    type SocketHandle;
 
     type OpenFuture<'m>: Future<Output = Self::SocketHandle>
     where
