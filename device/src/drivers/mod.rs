@@ -1,3 +1,4 @@
+pub mod ble;
 pub mod button;
 pub(crate) mod common;
 pub mod dns;

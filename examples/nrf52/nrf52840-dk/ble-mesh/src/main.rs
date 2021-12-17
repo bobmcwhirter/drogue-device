@@ -4,7 +4,6 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 
-mod controller;
 mod ble_mesh;
 
 #[cfg(feature = "defmt-rtt")]
@@ -24,14 +23,14 @@ use nrf_softdevice::Softdevice;
 
 use panic_probe as _;
 
-use crate::controller::BleController;
 use heapless::Vec;
 use crate::ble_mesh::MeshBleService;
+use crate::ble_mesh::nrf52::Nrf52BleMeshController;
 
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
-    mesh: MeshBleService,
+    mesh: MeshBleService<Nrf52BleMeshController>,
 }
 
 static DEVICE: DeviceContext<MyDevice> = DeviceContext::new();

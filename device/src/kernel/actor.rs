@@ -214,6 +214,8 @@ pub trait ActorSpawner: Clone + Copy {
         task: &'static Task<F>,
         future: F,
     ) -> Result<(), SpawnError>;
+
+    fn embassy_spawner(&self) -> Spawner;
 }
 
 impl ActorSpawner for Spawner {
@@ -223,6 +225,10 @@ impl ActorSpawner for Spawner {
         future: F,
     ) -> Result<(), SpawnError> {
         Spawner::spawn(self, Task::spawn(task, move || future))
+    }
+
+    fn embassy_spawner(&self) -> Spawner {
+        *self
     }
 }
 

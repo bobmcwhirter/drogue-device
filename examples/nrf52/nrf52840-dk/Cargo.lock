@@ -93,6 +93,7 @@ name = "ble-mesh"
 version = "0.1.0"
 dependencies = [
  "defmt",
+ "embassy",
  "heapless",
 ]
 
@@ -310,6 +311,8 @@ dependencies = [
  "embedded-hal",
  "futures",
  "heapless",
+ "nrf-softdevice",
+ "nrf-softdevice-s140",
  "rand_core",
 ]
 
