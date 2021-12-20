@@ -9,6 +9,7 @@ pub mod bearer;
 pub mod control;
 pub mod controller;
 pub mod device;
+pub mod generic_provisioning;
 pub mod pdu;
 pub mod provisioning;
 pub mod status;

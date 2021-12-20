@@ -1,5 +1,5 @@
 pub mod advertising {
-    use crate::drivers::ble::mesh::provisioning::Gpcf;
+    use crate::drivers::ble::mesh::generic_provisioning::GenericProvisioningPDU;
     use crate::drivers::ble::mesh::PB_ADV;
     use defmt::{write, Format, Formatter};
     use heapless::Vec;
@@ -7,39 +7,38 @@ pub mod advertising {
     pub struct PDU {
         link_id: u32,
         transaction_number: u8,
-        gpcf: Gpcf,
-        generic_provisioning_pdu: Vec<u8, 24>,
+        pdu: GenericProvisioningPDU,
     }
 
     impl Format for PDU {
         fn format(&self, fmt: Formatter) {
             write!(
                 fmt,
-                "link_id: {}; transaction_number: {}; gpcf: {}",
-                self.link_id, self.transaction_number, self.gpcf
+                "link_id: {}; transaction_number: {}; pdu: {}",
+                self.link_id, self.transaction_number, self.pdu
             );
         }
     }
 
     impl PDU {
-        pub fn parse(data: &[u8]) -> Option<PDU> {
+        pub fn parse(data: &[u8]) -> Result<PDU, ()> {
             if data.len() >= 8 {
                 if data[1] != PB_ADV {
-                    return None;
+                    Err(())
+                } else {
+                    let link_id = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
+                    let transaction_number = data[6];
+
+                    let pdu = GenericProvisioningPDU::parse(&data[7..])?;
+                    Ok(PDU {
+                        link_id,
+                        transaction_number,
+                        pdu,
+                    })
                 }
-                let link_id = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
-                let transaction_number = data[6];
-
-                let gpcf: Gpcf = data[7].into();
-                return Some(PDU {
-                    link_id,
-                    transaction_number,
-                    gpcf,
-                    generic_provisioning_pdu: Vec::new(),
-                });
+            } else {
+                Err(())
             }
-
-            None
         }
     }
 }
