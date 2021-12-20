@@ -1,4 +1,6 @@
+use defmt::Format;
 
+#[derive(Copy, Clone, Format)]
 pub struct Uuid(pub [u8; 16]);
 
 pub struct Device {

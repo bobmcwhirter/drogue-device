@@ -4,33 +4,32 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 
-mod ble_mesh;
-
 #[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 
-use drogue_device::{ActorContext, Address, Board, DeviceContext, Package, actors, drivers, Actor};
+use drogue_device::actors::ble::mesh::BleMesh;
+use drogue_device::drivers::ble::mesh::controller::nrf52::Nrf52BleMeshTransport;
+use drogue_device::drivers::ble::mesh::device::Uuid;
+use drogue_device::drivers::ble::mesh::transport::Transport;
+use drogue_device::{actors, drivers, Actor, ActorContext, Address, Board, DeviceContext, Package};
 use embassy::executor::Spawner;
 use embassy_nrf::config::Config;
+use embassy_nrf::gpio::{Level, OutputDrive, Pin};
 use embassy_nrf::interrupt::Priority;
+use embassy_nrf::peripherals::P0_13;
 use embassy_nrf::{
     gpio::{AnyPin, Output},
     Peripherals,
 };
-use embassy_nrf::gpio::{Level, OutputDrive, Pin};
-use embassy_nrf::peripherals::P0_13;
 use nrf_softdevice::Softdevice;
 
 use panic_probe as _;
 
 use heapless::Vec;
-use crate::ble_mesh::MeshBleService;
-use crate::ble_mesh::nrf52::Nrf52BleMeshController;
-
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
-    mesh: MeshBleService<Nrf52BleMeshController>,
+    mesh: BleMesh<Nrf52BleMeshTransport>,
 }
 
 static DEVICE: DeviceContext<MyDevice> = DeviceContext::new();
@@ -43,15 +42,18 @@ fn config() -> Config {
     config
 }
 
+const NODE_UUID: Uuid = Uuid([
+    0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF, 0xBE, 0xEF,
+]);
 
 #[embassy::main(config = "config()")]
 async fn main(spawner: Spawner, p: Peripherals) {
     let device = DEVICE.configure(MyDevice {
         led: ActorContext::new(),
-        mesh: MeshBleService::new(),
+        mesh: BleMesh::new(Nrf52BleMeshTransport::new()),
     });
 
-    device.mesh.mount( (), spawner);
+    device.mesh.mount(NODE_UUID, spawner);
 
     defmt::info!("Started");
 }

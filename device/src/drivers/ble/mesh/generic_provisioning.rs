@@ -1,5 +1,6 @@
 use crate::drivers::ble::mesh::device::Uuid;
 use core::convert::TryFrom;
+use core::convert::TryInto;
 use defmt::Format;
 use heapless::Vec;
 
@@ -26,7 +27,9 @@ impl GenericProvisioningPDU {
                 0b00 => Self::parse_transaction_start(data),
                 0b01 => Self::parse_transaction_ack(data),
                 0b10 => Self::parse_transaction_continuation(data),
-                0b11 => Self::ProvisioningBearerControl(ProvisioningBearerControl::parse(data)?),
+                0b11 => Ok(Self::ProvisioningBearerControl(
+                    ProvisioningBearerControl::parse(data)?,
+                )),
                 _ => Err(()),
             }
         } else {
@@ -39,12 +42,11 @@ impl GenericProvisioningPDU {
             let seg_n = (data[0] & 0b11111100) >> 2;
             let total_len = u16::from_be_bytes([data[1], data[2]]);
             let fcs = data[3];
-            let data = data[4..];
             Ok(Self::TransactionStart {
                 seg_n,
                 total_len,
                 fcs,
-                data: Vec::from_slice(&data).map_err(|_| ())?,
+                data: Vec::from_slice(&data[4..]).map_err(|_| ())?,
             })
         } else {
             Err(())
@@ -66,10 +68,9 @@ impl GenericProvisioningPDU {
     fn parse_transaction_continuation(data: &[u8]) -> Result<Self, ()> {
         if data.len() >= 2 {
             let segment_index = (data[0] & 0b11111100) >> 2;
-            let data = data[1..];
             Ok(Self::TransactionContinuation {
                 segment_index,
-                data: Vec::from_slice(&data).map_err(|_| ())?,
+                data: Vec::from_slice(&data[1..]).map_err(|_| ())?,
             })
         } else {
             Err(())
@@ -123,6 +124,7 @@ impl ProvisioningBearerControl {
     }
 }
 
+#[derive(Format)]
 pub enum Reason {
     Success = 0x00,
     Timeout = 0x01,
@@ -134,7 +136,7 @@ impl Reason {
         match reason {
             0x00 => Ok(Self::Success),
             0x01 => Ok(Self::Timeout),
-            0x02 => Ok(Self::Failse),
+            0x02 => Ok(Self::Fail),
             _ => Err(()),
         }
     }

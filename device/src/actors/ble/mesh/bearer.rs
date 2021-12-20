@@ -4,67 +4,72 @@ use core::future::Future;
 use heapless::Vec;
 use nrf_softdevice::Softdevice;
 
+use crate::actors::ble::mesh::coordinator::Coordinator;
+use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::PB_ADV;
 use core::cell::UnsafeCell;
 use core::ptr::slice_from_raw_parts;
 
-pub struct BleMeshBearer<T, H>
+pub struct BleMeshBearer<T>
 where
     T: Transport + 'static,
-    H: Handler + 'static,
 {
     transport: T,
     start: ActorContext<Start<T>>,
-    rx: ActorContext<Rx<T, H>>,
+    rx: ActorContext<Rx<T>>,
     tx: ActorContext<Tx<T>>,
-    handler: &'static H,
+    coordinator: ActorContext<Coordinator<T>>,
 }
 
-impl<T, H> BleMeshBearer<T, H>
+impl<T> BleMeshBearer<T>
 where
     T: Transport + 'static,
-    H: Handler + 'static,
 {
-    pub fn new(transport: T, handler: &'static H) -> Self {
+    pub fn new(transport: T) -> Self {
         Self {
             transport,
             start: ActorContext::new(),
             rx: ActorContext::new(),
             tx: ActorContext::new(),
-            handler,
+            coordinator: ActorContext::new(),
         }
     }
 }
 
-impl<T, H> Package for BleMeshBearer<T, H>
+impl<T> Package for BleMeshBearer<T>
 where
     T: Transport + 'static,
-    H: Handler + 'static,
 {
     type Primary = Tx<T>;
-    type Configuration = ();
+    type Configuration = Uuid;
 
     fn mount<S: ActorSpawner>(
         &'static self,
-        _config: Self::Configuration,
+        config: Self::Configuration,
         spawner: S,
     ) -> Address<Self::Primary> {
         let _ = self.start.mount(spawner, Start(&self.transport));
 
-        self.rx.mount(
-            spawner,
-            Rx {
-                transport: &self.transport,
-                handler: self.handler,
-            },
-        );
-
-        self.tx.mount(
+        let tx = self.tx.mount(
             spawner,
             Tx {
                 transport: &self.transport,
             },
-        )
+        );
+
+        let coordinator = self
+            .coordinator
+            .mount(spawner, Coordinator::new(config, tx));
+
+        let rx = self.rx.mount(
+            spawner,
+            Rx {
+                transport: &self.transport,
+                handler: coordinator,
+            },
+        );
+
+        tx
     }
 }
 
@@ -82,17 +87,24 @@ impl<T: Transport + 'static> Actor for Start<T> {
         M: Inbox<Self> + 'm,
     {
         async move {
+            defmt::info!("transport START");
             self.0.start().await;
         }
     }
 }
 
-struct Rx<T: Transport + 'static, H: Handler + 'static> {
+struct Rx<T>
+where
+    T: Transport + 'static,
+{
     transport: &'static T,
-    handler: &'static H,
+    handler: Address<Coordinator<T>>,
 }
 
-impl<T: Transport + 'static, H: Handler + 'static> Actor for Rx<T, H> {
+impl<T> Actor for Rx<T>
+where
+    T: Transport + 'static,
+{
     type OnMountFuture<'m, M>
     where
         Self: 'm,
@@ -103,7 +115,7 @@ impl<T: Transport + 'static, H: Handler + 'static> Actor for Rx<T, H> {
         M: Inbox<Self> + 'm,
     {
         async move {
-            self.transport.start_receive(self.handler).await;
+            self.transport.start_receive(&self.handler).await;
         }
     }
 }
@@ -112,13 +124,16 @@ pub struct Tx<T: Transport + 'static> {
     transport: &'static T,
 }
 
-pub struct Transmit<'m>(pub &'m [u8]);
+pub enum TxMessage<'m> {
+    UnprovisionedBeacon(Uuid),
+    Transmit(&'m [u8]),
+}
 
 impl<T: Transport + 'static> Actor for Tx<T> {
     type Message<'m>
     where
         Self: 'm,
-    = Transmit<'m>;
+    = TxMessage<'m>;
     type OnMountFuture<'m, M>
     where
         Self: 'm,
@@ -137,8 +152,17 @@ impl<T: Transport + 'static> Actor for Tx<T> {
                 defmt::info!("loop");
                 match inbox.next().await {
                     Some(ref mut message) => {
-                        let xmit = message.message();
-                        self.transport.transmit(xmit.0).await;
+                        let tx = message.message();
+                        match tx {
+                            TxMessage::UnprovisionedBeacon(uuid) => {
+                                defmt::info!("Unprovisioned {}", uuid);
+                                self.transport.send_unprovisioned_beacon(*uuid).await;
+                            }
+                            TxMessage::Transmit(payload) => {
+                                defmt::info!("Transmit {}", payload);
+                                self.transport.transmit(payload).await;
+                            }
+                        }
                     }
                     None => {}
                 }

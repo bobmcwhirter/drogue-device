@@ -1,6 +1,8 @@
 use core::convert::TryInto;
+use defmt::Format;
 use heapless::Vec;
 
+#[derive(Format)]
 pub enum ProvisioningPDU {
     Invite {
         attention_duration: u8,
@@ -97,7 +99,7 @@ impl ProvisioningPDU {
                 Self::parse_output_oob_action(u16::from_be_bytes([data[6], data[7]]))?;
             let input_oob_size = OOBSize::parse(data[8])?;
             let input_oob_action =
-                Self::parse_input_oob_action(u16::from_be_bytes([data[9], data[10]]))?;
+                Self::parse_input_oob_actions(u16::from_be_bytes([data[9], data[10]]))?;
 
             Ok(Self::Capabilities {
                 number_of_elements,
@@ -122,7 +124,7 @@ impl ProvisioningPDU {
         let mut algos = Algorithms::new();
 
         if bits & 0b1 == 1 {
-            algos.push(Algorithm::P256)
+            algos.push(Algorithm::P256).map_err(|_| ())?;
         }
 
         Ok(algos)
@@ -155,23 +157,27 @@ impl ProvisioningPDU {
 
         let mut actions = OutputOOBActions::new();
         if bits & 0b00000001 == 1 {
-            actions.push(OutputOOBAction::Blink)
+            actions.push(OutputOOBAction::Blink).map_err(|_| ())?;
         }
 
         if bits & 0b00000010 == 1 {
-            actions.push(OutputOOBAction::Beep)
+            actions.push(OutputOOBAction::Beep).map_err(|_| ())?;
         }
 
         if bits & 0b00000100 == 1 {
-            actions.push(OutputOOBAction::Vibrate)
+            actions.push(OutputOOBAction::Vibrate).map_err(|_| ())?;
         }
 
         if bits & 0b00001000 == 1 {
-            actions.push(OutputOOBAction::OutputNumeric)
+            actions
+                .push(OutputOOBAction::OutputNumeric)
+                .map_err(|_| ())?;
         }
 
         if bits & 0b00010000 == 1 {
-            actions.push(OutputOOBAction::OutputAlphanumeric)
+            actions
+                .push(OutputOOBAction::OutputAlphanumeric)
+                .map_err(|_| ())?;
         }
 
         Ok(actions)
@@ -184,19 +190,21 @@ impl ProvisioningPDU {
 
         let mut actions = InputOOBActions::new();
         if bits & 0b00000001 == 1 {
-            actions.push(InputOOBAction::Push)
+            actions.push(InputOOBAction::Push).map_err(|_| ())?;
         }
 
         if bits & 0b00000010 == 1 {
-            actions.push(InputOOBAction::Twist)
+            actions.push(InputOOBAction::Twist).map_err(|_| ())?;
         }
 
         if bits & 0b00000100 == 1 {
-            actions.push(InputOOBAction::InputNumeric)
+            actions.push(InputOOBAction::InputNumeric).map_err(|_| ())?;
         }
 
         if bits & 0b00001000 == 1 {
-            actions.push(InputOOBAction::InputAlphanumeric)
+            actions
+                .push(InputOOBAction::InputAlphanumeric)
+                .map_err(|_| ())?;
         }
 
         Ok(actions)
@@ -229,7 +237,7 @@ impl ProvisioningPDU {
                 if octet != 0 {
                     Err(())
                 } else {
-                    OOBSize::NotSupported
+                    Ok(OOBSize::NotSupported)
                 }
             }
             AuthenticationMethod::OutputOOBAuthentication
@@ -248,8 +256,8 @@ impl ProvisioningPDU {
             Err(())
         } else {
             Ok(Self::PublicKey {
-                x: data[0..32].try_into()?,
-                y: data[32..64].try_into()?,
+                x: data[0..32].try_into().map_err(|_| ())?,
+                y: data[32..64].try_into().map_err(|_| ())?,
             })
         }
     }
@@ -263,7 +271,7 @@ impl ProvisioningPDU {
             Err(())
         } else {
             Ok(Self::Confirmation {
-                confirmation: data.try_into()?,
+                confirmation: data.try_into().map_err(|_| ())?,
             })
         }
     }
@@ -273,7 +281,7 @@ impl ProvisioningPDU {
             Err(())
         } else {
             Ok(Self::Random {
-                random: data.try_into()?,
+                random: data.try_into().map_err(|_| ())?,
             })
         }
     }
@@ -283,8 +291,8 @@ impl ProvisioningPDU {
             Err(())
         } else {
             Ok(Self::Data {
-                encrypted: data[0..25].try_into()?,
-                mic: data[25..33].try_into()?,
+                encrypted: data[0..25].try_into().map_err(|_| ())?,
+                mic: data[25..33].try_into().map_err(|_| ())?,
             })
         }
     }
@@ -304,6 +312,7 @@ impl ProvisioningPDU {
     }
 }
 
+#[derive(Format)]
 pub enum Algorithm {
     P256,
 }
@@ -320,10 +329,12 @@ impl Algorithm {
 
 pub type Algorithms = Vec<Algorithm, 16>;
 
+#[derive(Format)]
 pub struct PublicKeyType {
     pub available: bool,
 }
 
+#[derive(Format)]
 pub enum PublicKey {
     NoPublicKey,
     OOBPublicKey,
@@ -339,10 +350,12 @@ impl PublicKey {
     }
 }
 
+#[derive(Format)]
 pub struct StaticOOBType {
     pub available: bool,
 }
 
+#[derive(Format)]
 pub enum OOBSize {
     NotSupported,
     MaximumSize(u8 /* 1-8 decimal */),
@@ -360,6 +373,7 @@ impl OOBSize {
     }
 }
 
+#[derive(Format)]
 pub enum OutputOOBAction {
     Blink,
     Beep,
@@ -383,6 +397,7 @@ impl OutputOOBAction {
 
 pub type OutputOOBActions = Vec<OutputOOBAction, 5>;
 
+#[derive(Format)]
 pub enum InputOOBAction {
     Push,
     Twist,
@@ -404,6 +419,7 @@ impl InputOOBAction {
 
 pub type InputOOBActions = Vec<InputOOBAction, 4>;
 
+#[derive(Format)]
 pub enum OOBAction {
     None,
     Output(OutputOOBAction),
@@ -431,6 +447,7 @@ impl OOBAction {
     }
 }
 
+#[derive(Format)]
 pub enum AuthenticationMethod {
     NoOOBAuthentication = 0x00,
     StaticOOBAuthentication = 0x01,
@@ -450,6 +467,7 @@ impl AuthenticationMethod {
     }
 }
 
+#[derive(Format)]
 pub enum ErrorCode {
     Prohibited = 0x00,
     InvalidPDU = 0x01,

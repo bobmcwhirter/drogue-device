@@ -1,9 +1,11 @@
+use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
-use crate::drivers::ble::mesh::PB_ADV;
+use crate::drivers::ble::mesh::{MESH_BEACON, PB_ADV};
 use core::future::Future;
 use core::mem;
 use core::ptr::slice_from_raw_parts;
 use embassy::executor::{SpawnToken, Spawner};
+use heapless::Vec;
 use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
 use nrf_softdevice::{raw, Softdevice};
@@ -65,6 +67,38 @@ impl Transport for Nrf52BleMeshTransport {
     fn start<'m>(&'m self) -> Self::StartFuture<'m> {
         async move {
             self.sd.run().await;
+        }
+    }
+
+    type SendUnprovisionedBeaconFuture<'m> = impl Future<Output = ()> + 'm;
+
+    fn send_unprovisioned_beacon<'m>(
+        &'m self,
+        uuid: Uuid,
+    ) -> Self::SendUnprovisionedBeaconFuture<'m> {
+        async move {
+            let mut adv_data: Vec<u8, 31> = Vec::new();
+            adv_data.extend_from_slice(&[20, MESH_BEACON, 0x00]);
+
+            adv_data.extend_from_slice(&uuid.0);
+
+            adv_data.extend_from_slice(&[0xa0, 0x40]).unwrap();
+
+            let adv = peripheral::NonconnectableAdvertisement::NonscannableUndirected {
+                adv_data: &*adv_data,
+            };
+
+            defmt::info!("nrf send");
+            peripheral::advertise(
+                self.sd,
+                adv,
+                &peripheral::Config {
+                    max_events: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await;
+            defmt::info!("nrf sent");
         }
     }
 
