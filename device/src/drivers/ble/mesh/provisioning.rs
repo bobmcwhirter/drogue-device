@@ -139,7 +139,22 @@ impl ProvisioningPDU {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {}
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+        match self {
+            ProvisioningPDU::Invite(_) => {}
+            ProvisioningPDU::Capabilities(capabilities) => {
+                capabilities.emit(xmit);
+            }
+            ProvisioningPDU::Start { .. } => {}
+            ProvisioningPDU::PublicKey { .. } => {}
+            ProvisioningPDU::InputComplete => {}
+            ProvisioningPDU::Confirmation { .. } => {}
+            ProvisioningPDU::Random { .. } => {}
+            ProvisioningPDU::Data { .. } => {}
+            ProvisioningPDU::Complete => {}
+            ProvisioningPDU::Failed { .. } => {}
+        }
+    }
 
     fn parse_provisioning_start(data: &[u8]) -> Result<Self, ()> {
         if data.len() == 5 {

@@ -121,6 +121,12 @@ impl<T: Transport + 'static> Device<T> {
                     defmt::info!("INVITED sending capabilities");
                     self.state = State::Provisioning(link_id, ProvisioningState::Invite);
 
+                    //let capabilities = PDU {
+                    //link_id,
+                    //transaction_number,
+                    //pdu: ProvisioningPDU::Capabilities(self.capabilities.clone()),
+                    //};
+
                     let mut xmit: Vec<u8, 128> = Vec::new();
                     ProvisioningPDU::Capabilities(self.capabilities.clone()).emit(&mut xmit);
                     self.tx.request(TxMessage::Transmit(&*xmit)).unwrap().await;
