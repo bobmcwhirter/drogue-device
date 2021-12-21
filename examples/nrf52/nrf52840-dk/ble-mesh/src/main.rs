@@ -10,6 +10,10 @@ use defmt_rtt as _;
 use drogue_device::actors::ble::mesh::BleMesh;
 use drogue_device::drivers::ble::mesh::controller::nrf52::Nrf52BleMeshTransport;
 use drogue_device::drivers::ble::mesh::device::Uuid;
+use drogue_device::drivers::ble::mesh::provisioning::{
+    Algorithms, Capabilities, InputOOBActions, OOBSize, OutputOOBActions, PublicKeyType,
+    StaticOOBType,
+};
 use drogue_device::drivers::ble::mesh::transport::Transport;
 use drogue_device::{actors, drivers, Actor, ActorContext, Address, Board, DeviceContext, Package};
 use embassy::executor::Spawner;
@@ -53,7 +57,18 @@ async fn main(spawner: Spawner, p: Peripherals) {
         mesh: BleMesh::new(Nrf52BleMeshTransport::new()),
     });
 
-    device.mesh.mount(NODE_UUID, spawner);
+    let capabilities = Capabilities {
+        number_of_elements: 1,
+        algorithms: Algorithms::default(),
+        public_key_type: PublicKeyType::default(),
+        static_oob_type: StaticOOBType::default(),
+        output_oob_size: OOBSize::MaximumSize(4),
+        output_oob_action: OutputOOBActions::default(),
+        input_oob_size: OOBSize::MaximumSize(4),
+        input_oob_action: InputOOBActions::default(),
+    };
+
+    device.mesh.mount((NODE_UUID, capabilities), spawner);
 
     defmt::info!("Started");
 }

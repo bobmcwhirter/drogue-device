@@ -4,8 +4,9 @@ use core::future::Future;
 use heapless::Vec;
 use nrf_softdevice::Softdevice;
 
-use crate::actors::ble::mesh::coordinator::Coordinator;
+use crate::actors::ble::mesh::device::Device;
 use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::provisioning::Capabilities;
 use crate::drivers::ble::mesh::PB_ADV;
 use core::cell::UnsafeCell;
 use core::ptr::slice_from_raw_parts;
@@ -18,7 +19,7 @@ where
     start: ActorContext<Start<T>>,
     rx: ActorContext<Rx<T>>,
     tx: ActorContext<Tx<T>>,
-    coordinator: ActorContext<Coordinator<T>>,
+    device: ActorContext<Device<T>>,
 }
 
 impl<T> BleMeshBearer<T>
@@ -31,7 +32,7 @@ where
             start: ActorContext::new(),
             rx: ActorContext::new(),
             tx: ActorContext::new(),
-            coordinator: ActorContext::new(),
+            device: ActorContext::new(),
         }
     }
 }
@@ -41,7 +42,7 @@ where
     T: Transport + 'static,
 {
     type Primary = Tx<T>;
-    type Configuration = Uuid;
+    type Configuration = (Uuid, Capabilities);
 
     fn mount<S: ActorSpawner>(
         &'static self,
@@ -58,8 +59,8 @@ where
         );
 
         let coordinator = self
-            .coordinator
-            .mount(spawner, Coordinator::new(config, tx));
+            .device
+            .mount(spawner, Device::new(config.0, config.1, tx));
 
         let rx = self.rx.mount(
             spawner,
@@ -98,7 +99,7 @@ where
     T: Transport + 'static,
 {
     transport: &'static T,
-    handler: Address<Coordinator<T>>,
+    handler: Address<Device<T>>,
 }
 
 impl<T> Actor for Rx<T>
@@ -149,13 +150,11 @@ impl<T: Transport + 'static> Actor for Tx<T> {
     {
         async move {
             loop {
-                defmt::info!("loop");
                 match inbox.next().await {
                     Some(ref mut message) => {
                         let tx = message.message();
                         match tx {
                             TxMessage::UnprovisionedBeacon(uuid) => {
-                                defmt::info!("Unprovisioned {}", uuid);
                                 self.transport.send_unprovisioned_beacon(*uuid).await;
                             }
                             TxMessage::Transmit(payload) => {

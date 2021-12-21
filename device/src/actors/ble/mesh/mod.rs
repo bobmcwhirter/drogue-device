@@ -1,13 +1,14 @@
 use crate::actors::ble::mesh::bearer::{BleMeshBearer, Tx};
-use crate::actors::ble::mesh::coordinator::Coordinator;
+use crate::actors::ble::mesh::device::Device;
 use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::provisioning::Capabilities;
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
 use core::future::Future;
 use heapless::Vec;
 
 pub mod bearer;
-pub mod coordinator;
+pub mod device;
 
 pub struct BleMesh<T: Transport + 'static> {
     bearer: BleMeshBearer<T>,
@@ -15,7 +16,6 @@ pub struct BleMesh<T: Transport + 'static> {
 }
 
 impl<T: Transport + 'static> BleMesh<T> {
-    //pub fn new(bearer: BleMeshBearer<T, Address<Coordinator<T>>>) -> Self {
     pub fn new(transport: T) -> Self {
         Self {
             bearer: BleMeshBearer::new(transport),
@@ -26,7 +26,7 @@ impl<T: Transport + 'static> BleMesh<T> {
 
 impl<T: Transport + 'static> Package for BleMesh<T> {
     type Primary = NoOp;
-    type Configuration = Uuid;
+    type Configuration = (Uuid, Capabilities);
 
     fn mount<S: ActorSpawner>(
         &'static self,

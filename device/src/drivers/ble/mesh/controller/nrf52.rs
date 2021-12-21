@@ -27,12 +27,6 @@ impl Nrf52BleMeshTransport {
                 conn_count: 6,
                 event_length: 24,
             }),
-            /*
-            conn_gatt: Some(raw::ble_gatt_conn_cfg_t { att_mtu: 256 }),
-            gatts_attr_tab_size: Some(raw::ble_gatts_cfg_attr_tab_size_t {
-                attr_tab_size: 32768,
-            }),
-             */
             gap_role_count: Some(raw::ble_gap_cfg_role_count_t {
                 adv_set_count: 1,
                 periph_role_count: 3,
@@ -90,7 +84,6 @@ impl Transport for Nrf52BleMeshTransport {
                 adv_data: &*adv_data,
             };
 
-            defmt::info!("nrf send");
             peripheral::advertise(
                 self.sd,
                 adv,
@@ -100,7 +93,6 @@ impl Transport for Nrf52BleMeshTransport {
                 },
             )
             .await;
-            defmt::info!("nrf sent");
         }
     }
 
@@ -111,11 +103,13 @@ impl Transport for Nrf52BleMeshTransport {
             peripheral::NonconnectableAdvertisement::NonscannableUndirected { adv_data: message };
 
         async move {
+            defmt::info!("XMIT nRF: {:x}", message);
             peripheral::advertise(
                 self.sd,
                 adv,
                 &peripheral::Config {
                     max_events: Some(1),
+                    //timeout: Some(300),
                     ..Default::default()
                 },
             )
@@ -137,11 +131,9 @@ impl Transport for Nrf52BleMeshTransport {
                     let data = event.data;
                     let data = unsafe { &*slice_from_raw_parts(data.p_data, data.len as usize) };
                     if data.len() >= 2 && data[1] == PB_ADV {
-                        //handler.handle(data);
-                        None
-                    } else {
-                        None
+                        handler.handle(Vec::from_slice(data).unwrap());
                     }
+                    None
                 })
                 .await;
             }
