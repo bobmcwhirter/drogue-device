@@ -1,7 +1,8 @@
-use super::provisioning_bearer_control::ProvisioningBearerControlHander;
+use super::handlers::ProvisioningBearerControlHander;
+use super::handlers::TransactionHandler;
 use crate::actors::ble::mesh::bearer::TxMessage::Transmit;
 use crate::actors::ble::mesh::bearer::{Tx, TxMessage};
-use crate::actors::ble::mesh::transaction::TransactionHandler;
+use crate::actors::ble::mesh::handlers::ProvisioningHandler;
 use crate::drivers::ble::mesh::bearer::advertising;
 use crate::drivers::ble::mesh::bearer::advertising::{PBAdvError, PDU};
 use crate::drivers::ble::mesh::device::Uuid;
@@ -18,18 +19,13 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use embassy::time::{Duration, Ticker};
 use futures::future::{select, Either};
 use futures::{pin_mut, StreamExt};
+use heapless::spsc::Queue;
 use heapless::Vec;
 
 enum State {
     Unprovisioned,
     Provisioning,
     Provisioned,
-}
-
-enum ProvisioningState {
-    LinkOpen,
-    TransactionStart,
-    Invite,
 }
 
 pub struct Device<T: Transport + 'static> {
@@ -40,8 +36,10 @@ pub struct Device<T: Transport + 'static> {
     tx: Address<Tx<T>>,
     ticker: Ticker,
     // Handlers
+    outbound: RefCell<Option<ProvisioningPDU>>,
     provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T>>,
     transaction: RefCell<TransactionHandler<T>>,
+    provisioning: RefCell<ProvisioningHandler<T>>,
 }
 
 impl<T: Transport + 'static> Device<T> {
@@ -53,8 +51,10 @@ impl<T: Transport + 'static> Device<T> {
             state: State::Unprovisioned,
             tx,
             ticker: Ticker::every(Duration::from_secs(3)),
+            outbound: RefCell::new(None),
             provisioning_bearer_control: RefCell::new(ProvisioningBearerControlHander::new()),
             transaction: RefCell::new(TransactionHandler::new()),
+            provisioning: RefCell::new(ProvisioningHandler::new()),
         }
     }
 
@@ -64,74 +64,67 @@ impl<T: Transport + 'static> Device<T> {
         self.transaction_number.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn link_id(&self) -> Result<u32, ()> {
+        self.provisioning_bearer_control.borrow().link_id.ok_or(())
+    }
+
+    pub(crate) async fn tx(&self, data: &[u8]) -> Result<(),()> {
+        self.tx.request(TxMessage::Transmit(data)).unwrap().await;
+        Ok(())
+    }
+
+    pub(crate) async fn tx_pdu(&self, pdu: PDU) -> Result<(), ()> {
+        defmt::info!("XMIT {}", pdu);
+        let mut xmit: Vec<u8, 128> = Vec::new();
+        pdu.emit(&mut xmit);
+        self.tx(&*xmit).await
+    }
+
     pub(crate) async fn tx_link_ack(&self, link_id: u32) -> Result<(), ()> {
-        let ack = PDU {
-            link_id: self
-                .provisioning_bearer_control
-                .borrow()
-                .link_id
-                .ok_or(())?,
+        self.tx_pdu( PDU {
+            link_id: link_id,
             transaction_number: self.next_transaction(),
             pdu: GenericProvisioningPDU::ProvisioningBearerControl(
                 ProvisioningBearerControl::LinkAck,
             ),
-        };
-
-        let mut xmit: Vec<u8, 128> = Vec::new();
-        ack.emit(&mut xmit);
-        self.tx.request(TxMessage::Transmit(&*xmit)).unwrap().await;
-        Ok(())
+        } ).await
     }
 
     pub(crate) async fn tx_transaction_ack(&self, transaction_number: u8) -> Result<(), ()> {
-        let ack = PDU {
-            link_id: self
-                .provisioning_bearer_control
-                .borrow()
-                .link_id
-                .ok_or(())?,
-            transaction_number: self.transaction.borrow().transaction_number.ok_or(())?,
+        self.tx_pdu( PDU {
+            link_id: self.link_id()?,
+            transaction_number,
             pdu: GenericProvisioningPDU::TransactionAck,
-        };
+        } ).await
+    }
 
-        let mut xmit: Vec<u8, 128> = Vec::new();
-        ack.emit(&mut xmit);
-        self.tx.request(TxMessage::Transmit(&*xmit)).unwrap().await;
+    pub(crate) fn tx_capabilities(&self) -> Result<(), ()> {
+        let pdu = ProvisioningPDU::Capabilities(self.capabilities.clone());
+        defmt::info!("add CAPABILITIES to outbound");
+        self.outbound.borrow_mut().replace(pdu);
         Ok(())
     }
 
-    async fn handle_transaction_start(
-        &mut self,
-        link_id: u32,
-        transaction_number: u8,
-        tx_start: TransactionStart,
-    ) {
-        if matches!(self.state, State::Provisioning,) {
-            self.state = State::Provisioning;
+    pub(crate) async fn handle_provisioning_pdu(&self, pdu: ProvisioningPDU) -> Result<(), ()> {
+        self.provisioning.borrow_mut().handle(self, pdu).await?;
+        Ok(())
+    }
 
-            let pdu = ProvisioningPDU::parse(&*tx_start.data).unwrap();
-            defmt::info!("tx {}", pdu);
-
-            match pdu {
-                ProvisioningPDU::Invite(invite) => {
-                    defmt::info!("INVITED sending capabilities");
-                    self.state = State::Provisioning;
-
-                    //let capabilities = PDU {
-                    //link_id,
-                    //transaction_number,
-                    //pdu: ProvisioningPDU::Capabilities(self.capabilities.clone()),
-                    //};
-
-                    let mut xmit: Vec<u8, 128> = Vec::new();
-                    ProvisioningPDU::Capabilities(self.capabilities.clone()).emit(&mut xmit);
-                    self.tx.request(TxMessage::Transmit(&*xmit)).unwrap().await;
-                }
-                _ => {
-                    defmt::info!("unhandled PDU {}", pdu)
-                }
+    pub(crate) async fn handle_transmit(&self) -> Result<(), ()> {
+        defmt::info!("HANDLE TRANSMIT ****************");
+        let mut outbound = self.outbound.borrow_mut();
+        match *outbound {
+            None => {
+                defmt::info!("none outbound");
             }
+            Some(_) => {
+                defmt::info!("some outbound");
+            }
+
         }
+        self.transaction.borrow_mut().handle_outbound(self, outbound.take()).await?;
+        defmt::info!("xmit 3");
+        Ok(())
     }
 }
 
@@ -193,10 +186,26 @@ impl<T: Transport + 'static> Actor for Device<T> {
                                                 }
                                             }
                                         }
-                                        GenericProvisioningPDU::TransactionContinuation {
-                                            ..
-                                        } => {
+                                        GenericProvisioningPDU::TransactionContinuation(
+                                            tx_cont,
+                                        ) => {
                                             defmt::info!("transaction continuation");
+                                            let current_link_id =
+                                                self.provisioning_bearer_control.borrow().link_id;
+                                            if let Some(current_link_id) =
+                                                self.provisioning_bearer_control.borrow().link_id
+                                            {
+                                                if current_link_id == pdu.link_id {
+                                                    self.transaction
+                                                        .borrow_mut()
+                                                        .handle_transaction_continuation(
+                                                            self,
+                                                            pdu.transaction_number,
+                                                            &tx_cont,
+                                                        )
+                                                        .await;
+                                                }
+                                            }
                                         }
                                         GenericProvisioningPDU::TransactionAck => {
                                             defmt::info!("transaction ack");
@@ -225,6 +234,7 @@ impl<T: Transport + 'static> Actor for Device<T> {
                         }
                     }
                 }
+                self.handle_transmit().await;
             }
         }
     }

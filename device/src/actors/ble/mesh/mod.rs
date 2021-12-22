@@ -9,8 +9,7 @@ use heapless::Vec;
 
 pub mod bearer;
 pub mod device;
-mod provisioning_bearer_control;
-mod transaction;
+mod handlers;
 
 pub struct BleMesh<T: Transport + 'static> {
     bearer: BleMeshBearer<T>,

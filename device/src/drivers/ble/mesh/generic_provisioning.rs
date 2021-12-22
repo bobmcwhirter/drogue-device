@@ -8,10 +8,7 @@ use heapless::Vec;
 pub enum GenericProvisioningPDU {
     TransactionStart(TransactionStart),
     TransactionAck,
-    TransactionContinuation {
-        segment_index: u8,
-        data: Vec<u8, 64>,
-    },
+    TransactionContinuation(TransactionContinuation),
     ProvisioningBearerControl(ProvisioningBearerControl),
 }
 
@@ -40,6 +37,40 @@ impl TransactionStart {
             Err(GenericProvisioningError::InvalidSize)
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
+        xmit.push( self.seg_n << 2);
+        xmit.extend_from_slice( &self.total_len.to_be_bytes() );
+        xmit.push(self.fcs);
+        xmit.extend_from_slice(&*self.data);
+    }
+}
+
+#[derive(Format)]
+pub struct TransactionContinuation {
+    pub segment_index: u8,
+    pub data: Vec<u8, 64>
+}
+
+impl TransactionContinuation {
+    pub fn parse(data: &[u8]) -> Result<Self, GenericProvisioningError> {
+        if data.len() >= 2 {
+            let segment_index = (data[0] & 0b11111100) >> 2;
+            Ok(Self {
+                segment_index,
+                data: Vec::from_slice(&data[1..])
+                    .map_err(|_| GenericProvisioningError::InvalidSize)?,
+            })
+        } else {
+            Err(GenericProvisioningError::InvalidSize)
+        }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
+        xmit.push( self.segment_index << 2 | 0b10 );
+        xmit.extend_from_slice(&*self.data);
+    }
+
 }
 
 #[derive(Format)]
@@ -57,7 +88,7 @@ impl GenericProvisioningPDU {
             match data[0] & 0b11 {
                 0b00 => Ok(Self::TransactionStart(TransactionStart::parse(data)?)),
                 0b01 => Self::parse_transaction_ack(data),
-                0b10 => Self::parse_transaction_continuation(data),
+                0b10 => Ok(Self::TransactionContinuation(TransactionContinuation::parse(data)?)),
                 0b11 => Ok(Self::ProvisioningBearerControl(
                     ProvisioningBearerControl::parse(data)?,
                 )),
@@ -71,12 +102,16 @@ impl GenericProvisioningPDU {
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
         defmt::info!("pdu pre: {:x}", xmit);
         match self {
-            GenericProvisioningPDU::TransactionStart(tx_start) => {}
+            GenericProvisioningPDU::TransactionStart(tx_start) => {
+                tx_start.emit(xmit);
+            }
             GenericProvisioningPDU::TransactionAck => {
                 // Ack is simple.
                 xmit.push(0b00000001);
             }
-            GenericProvisioningPDU::TransactionContinuation { .. } => {}
+            GenericProvisioningPDU::TransactionContinuation(tx_cont) => {
+                tx_cont.emit(xmit);
+            }
             GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
                 pbc.emit(xmit);
             }
@@ -91,19 +126,6 @@ impl GenericProvisioningPDU {
             } else {
                 Err(GenericProvisioningError::InvalidBits)
             }
-        } else {
-            Err(GenericProvisioningError::InvalidSize)
-        }
-    }
-
-    fn parse_transaction_continuation(data: &[u8]) -> Result<Self, GenericProvisioningError> {
-        if data.len() >= 2 {
-            let segment_index = (data[0] & 0b11111100) >> 2;
-            Ok(Self::TransactionContinuation {
-                segment_index,
-                data: Vec::from_slice(&data[1..])
-                    .map_err(|_| GenericProvisioningError::InvalidSize)?,
-            })
         } else {
             Err(GenericProvisioningError::InvalidSize)
         }

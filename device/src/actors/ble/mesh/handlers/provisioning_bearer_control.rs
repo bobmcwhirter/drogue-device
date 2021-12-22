@@ -12,7 +12,7 @@ enum State {
     LinkOpen,
 }
 
-pub(crate) struct ProvisioningBearerControlHander<T: Transport + 'static> {
+pub struct ProvisioningBearerControlHander<T: Transport + 'static> {
     state: State,
     pub(crate) link_id: Option<u32>,
     transaction_number: u8,

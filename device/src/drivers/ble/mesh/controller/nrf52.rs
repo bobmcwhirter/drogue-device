@@ -108,7 +108,8 @@ impl Transport for Nrf52BleMeshTransport {
                 self.sd,
                 adv,
                 &peripheral::Config {
-                    max_events: Some(1),
+                    max_events: Some(3),
+                    interval: 100,
                     //timeout: Some(300),
                     ..Default::default()
                 },
