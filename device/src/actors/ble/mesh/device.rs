@@ -68,39 +68,40 @@ impl<T: Transport + 'static> Device<T> {
         self.provisioning_bearer_control.borrow().link_id.ok_or(())
     }
 
-    pub(crate) async fn tx(&self, data: &[u8]) -> Result<(),()> {
+    pub(crate) async fn tx(&self, data: &[u8]) -> Result<(), ()> {
         self.tx.request(TxMessage::Transmit(data)).unwrap().await;
         Ok(())
     }
 
     pub(crate) async fn tx_pdu(&self, pdu: PDU) -> Result<(), ()> {
-        defmt::info!("XMIT {}", pdu);
+        defmt::info!("<< outbound << {}", pdu);
         let mut xmit: Vec<u8, 128> = Vec::new();
         pdu.emit(&mut xmit);
         self.tx(&*xmit).await
     }
 
     pub(crate) async fn tx_link_ack(&self, link_id: u32) -> Result<(), ()> {
-        self.tx_pdu( PDU {
+        self.tx_pdu(PDU {
             link_id: link_id,
             transaction_number: self.next_transaction(),
             pdu: GenericProvisioningPDU::ProvisioningBearerControl(
                 ProvisioningBearerControl::LinkAck,
             ),
-        } ).await
+        })
+        .await
     }
 
     pub(crate) async fn tx_transaction_ack(&self, transaction_number: u8) -> Result<(), ()> {
-        self.tx_pdu( PDU {
+        self.tx_pdu(PDU {
             link_id: self.link_id()?,
             transaction_number,
             pdu: GenericProvisioningPDU::TransactionAck,
-        } ).await
+        })
+        .await
     }
 
     pub(crate) fn tx_capabilities(&self) -> Result<(), ()> {
         let pdu = ProvisioningPDU::Capabilities(self.capabilities.clone());
-        defmt::info!("add CAPABILITIES to outbound");
         self.outbound.borrow_mut().replace(pdu);
         Ok(())
     }
@@ -111,19 +112,11 @@ impl<T: Transport + 'static> Device<T> {
     }
 
     pub(crate) async fn handle_transmit(&self) -> Result<(), ()> {
-        defmt::info!("HANDLE TRANSMIT ****************");
         let mut outbound = self.outbound.borrow_mut();
-        match *outbound {
-            None => {
-                defmt::info!("none outbound");
-            }
-            Some(_) => {
-                defmt::info!("some outbound");
-            }
-
-        }
-        self.transaction.borrow_mut().handle_outbound(self, outbound.take()).await?;
-        defmt::info!("xmit 3");
+        self.transaction
+            .borrow_mut()
+            .handle_outbound(self, outbound.take())
+            .await?;
         Ok(())
     }
 }
@@ -161,10 +154,9 @@ impl<T: Transport + 'static> Actor for Device<T> {
                     Either::Left((ref mut msg, _)) => match msg {
                         Some(message) => {
                             let data = message.message();
-                            defmt::info!("received data {:x}", data);
                             if data.len() >= 2 && data[1] == PB_ADV {
                                 let pdu = advertising::PDU::parse(data);
-                                defmt::info!("received pdu {}", pdu);
+                                defmt::info!(">> inbound >> {}", pdu);
 
                                 if let Ok(pdu) = pdu {
                                     match pdu.pdu {
@@ -189,7 +181,6 @@ impl<T: Transport + 'static> Actor for Device<T> {
                                         GenericProvisioningPDU::TransactionContinuation(
                                             tx_cont,
                                         ) => {
-                                            defmt::info!("transaction continuation");
                                             let current_link_id =
                                                 self.provisioning_bearer_control.borrow().link_id;
                                             if let Some(current_link_id) =
@@ -208,7 +199,21 @@ impl<T: Transport + 'static> Actor for Device<T> {
                                             }
                                         }
                                         GenericProvisioningPDU::TransactionAck => {
-                                            defmt::info!("transaction ack");
+                                            let current_link_id =
+                                                self.provisioning_bearer_control.borrow().link_id;
+                                            if let Some(current_link_id) =
+                                                self.provisioning_bearer_control.borrow().link_id
+                                            {
+                                                if current_link_id == pdu.link_id {
+                                                    self.transaction
+                                                        .borrow_mut()
+                                                        .handle_transaction_ack(
+                                                            self,
+                                                            pdu.transaction_number,
+                                                        )
+                                                        .await;
+                                                }
+                                            }
                                         }
                                         GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
                                             self.state = State::Provisioning;
@@ -222,7 +227,7 @@ impl<T: Transport + 'static> Actor for Device<T> {
                             }
                         }
                         _ => {
-                            defmt::info!("got a None?")
+                            // ignore
                         }
                     },
                     Either::Right((_, _)) => {

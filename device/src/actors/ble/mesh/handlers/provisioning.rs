@@ -33,19 +33,35 @@ impl<T: Transport + 'static> ProvisioningHandler<T> {
     pub(crate) async fn handle(&mut self, device: &Device<T>, pdu: ProvisioningPDU) -> Result<(), ()> {
         match pdu {
             ProvisioningPDU::Invite(invite) => {
-                defmt::info!("Received INVITE");
+                defmt::info!(">> ProvisioningPDU::Invite");
                 self.state = State::Invite;
                 device.tx_capabilities()?;
             }
             ProvisioningPDU::Capabilities(_) => {}
-            ProvisioningPDU::Start { .. } => {}
-            ProvisioningPDU::PublicKey { .. } => {}
-            ProvisioningPDU::InputComplete => {}
-            ProvisioningPDU::Confirmation { .. } => {}
-            ProvisioningPDU::Random { .. } => {}
-            ProvisioningPDU::Data { .. } => {}
-            ProvisioningPDU::Complete => {}
-            ProvisioningPDU::Failed { .. } => {}
+            ProvisioningPDU::Start { .. } => {
+                defmt::info!(">> ProvisioningPDU::Start");
+            }
+            ProvisioningPDU::PublicKey { .. } => {
+                defmt::info!(">> ProvisioningPDU::PublicKey");
+            }
+            ProvisioningPDU::InputComplete => {
+                defmt::info!(">> ProvisioningPDU::InputComplete");
+            }
+            ProvisioningPDU::Confirmation { .. } => {
+                defmt::info!(">> ProvisioningPDU::Confirmation");
+            }
+            ProvisioningPDU::Random { .. } => {
+                defmt::info!(">> ProvisioningPDU::Random");
+            }
+            ProvisioningPDU::Data { .. } => {
+                defmt::info!(">> ProvisioningPDU::Data");
+            }
+            ProvisioningPDU::Complete => {
+                defmt::info!(">> ProvisioningPDU::Complete");
+            }
+            ProvisioningPDU::Failed { .. } => {
+                defmt::info!(">> ProvisioningPDU::Failed");
+            }
         }
         Ok(())
     }

@@ -22,12 +22,9 @@ pub mod advertising {
     impl PDU {
         pub fn parse(data: &[u8]) -> Result<PDU, PBAdvError> {
             if data.len() >= 8 {
-                defmt::info!("A");
                 if data[1] != PB_ADV {
-                    defmt::info!("B");
                     Err(PBAdvError::InvalidSize)
                 } else {
-                    defmt::info!("C: {:x}", data[2..6]);
                     let link_id = u32::from_be_bytes([data[2], data[3], data[4], data[5]]);
                     let transaction_number = data[6];
 
@@ -40,7 +37,6 @@ pub mod advertising {
                     })
                 }
             } else {
-                defmt::info!("D");
                 Err(PBAdvError::InvalidSize)
             }
         }

@@ -32,8 +32,8 @@ impl<T: Transport + 'static> TransactionHandler<T> {
     ) -> Result<(), ()> {
         if transaction_start.seg_n == 0 {
             let pdu = ProvisioningPDU::parse(&*transaction_start.data)?;
-            device.handle_provisioning_pdu(pdu).await?;
             device.tx_transaction_ack(transaction_number).await?;
+            device.handle_provisioning_pdu(pdu).await?;
         } else {
             self.inbound_segments = Some(InboundSegments::new(
                 transaction_number,
@@ -56,11 +56,12 @@ impl<T: Transport + 'static> TransactionHandler<T> {
             transaction_continuation.segment_index,
             &transaction_continuation.data,
         )? {
+            device.tx_transaction_ack(transaction_number).await?;
+
             let mut data: Vec<u8, 1024> = Vec::new();
             self.inbound_segments.as_ref().ok_or(())?.fill(&mut data);
             let pdu = ProvisioningPDU::parse(&*data)?;
             device.handle_provisioning_pdu(pdu).await?;
-            device.tx_transaction_ack(transaction_number).await?;
         }
 
         Ok(())
@@ -71,35 +72,39 @@ impl<T: Transport + 'static> TransactionHandler<T> {
         device: &Device<T>,
         pdu: Option<ProvisioningPDU>,
     ) -> Result<(), ()> {
-        defmt::info!("&& A");
         match pdu {
             None => {
-                defmt::info!("&& B");
+                // nothing
             }
             Some(pdu) => {
-                defmt::info!("&& C");
                 if self.outbound_segments.is_some() {
-                    defmt::info!("&& D {}", self.outbound_segments);
+                    // TODO check transaction_number
                     //return Err(());
                 }
-                defmt::info!("&& E");
                 self.outbound_segments
                     .replace(OutboundSegments::new(device.next_transaction(), pdu));
             }
         }
-        defmt::info!("&& F");
 
         if let Some(segments) = &self.outbound_segments {
-            defmt::info!("TRANSMIT OUTBOUND TRANSACTION");
             segments.transmit(device).await?;
         }
-        defmt::info!("&& G");
 
         Ok(())
     }
 
-    pub(crate) async fn handle_transaction_ack() {
-        // ignorable for this role?
+    pub(crate) async fn handle_transaction_ack(&mut self, device: &Device<T>, transaction_number: u8) -> Result<(),()>{
+        match &self.outbound_segments {
+            None => { /* nothing */ }
+            Some(segments) => {
+                defmt::info!(">> TransactionAck {}", segments.transaction_number);
+                if segments.transaction_number == transaction_number {
+                    self.outbound_segments.take();
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -160,6 +165,7 @@ struct OutboundSegments {
     transaction_number: u8,
     pdu: Vec<u8, 256>,
     fcs: u8,
+    // TODO remove this field.
     orig: ProvisioningPDU,
 }
 
@@ -177,8 +183,8 @@ impl OutboundSegments {
     }
 
     pub async fn transmit<T: Transport + 'static>(&self, device: &Device<T>) -> Result<(), ()> {
+        defmt::info!("<< outbound << {}", self.orig);
         let num_chunks = self.pdu.chunks(15).count();
-        defmt::info!("chunks {}", num_chunks);
         for (i, chunk) in self.pdu.chunks(15).enumerate() {
             let pdu = if i == 0 {
                 GenericProvisioningPDU::TransactionStart(TransactionStart {
@@ -200,9 +206,7 @@ impl OutboundSegments {
                 pdu,
             };
 
-            defmt::info!("tx via btle");
             device.tx_pdu(pdu).await;
-            defmt::info!("tx'd via btle");
         }
         Ok(())
     }

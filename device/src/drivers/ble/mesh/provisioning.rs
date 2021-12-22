@@ -107,7 +107,6 @@ impl Capabilities {
 
 impl ProvisioningPDU {
     pub fn parse(data: &[u8]) -> Result<Self, ()> {
-        defmt::info!("parsing PDU {:x}", data);
         if data.len() >= 1 {
             match data[0] {
                 0x00 => Ok(Self::Invite(Invite::parse(data)?)),

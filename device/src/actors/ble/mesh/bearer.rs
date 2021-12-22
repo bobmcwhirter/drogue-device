@@ -158,7 +158,7 @@ impl<T: Transport + 'static> Actor for Tx<T> {
                                 self.transport.send_unprovisioned_beacon(*uuid).await;
                             }
                             TxMessage::Transmit(payload) => {
-                                defmt::info!("Transmit {}", payload);
+                                defmt::info!("<<<< Transmit {}", payload);
                                 self.transport.transmit(payload).await;
                             }
                         }

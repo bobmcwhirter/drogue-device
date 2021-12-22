@@ -100,7 +100,6 @@ impl GenericProvisioningPDU {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
-        defmt::info!("pdu pre: {:x}", xmit);
         match self {
             GenericProvisioningPDU::TransactionStart(tx_start) => {
                 tx_start.emit(xmit);
@@ -116,7 +115,6 @@ impl GenericProvisioningPDU {
                 pbc.emit(xmit);
             }
         }
-        defmt::info!("pdu post: {:x}", xmit);
     }
 
     fn parse_transaction_ack(data: &[u8]) -> Result<Self, GenericProvisioningError> {

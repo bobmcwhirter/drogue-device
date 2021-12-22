@@ -103,7 +103,6 @@ impl Transport for Nrf52BleMeshTransport {
             peripheral::NonconnectableAdvertisement::NonscannableUndirected { adv_data: message };
 
         async move {
-            defmt::info!("XMIT nRF: {:x}", message);
             peripheral::advertise(
                 self.sd,
                 adv,

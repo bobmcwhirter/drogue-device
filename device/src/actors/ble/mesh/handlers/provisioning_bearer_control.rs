@@ -42,6 +42,7 @@ impl<T: Transport + 'static> ProvisioningBearerControlHander<T> {
                 }
 
                 if matches!(self.link_id, None) || matches!(self.link_id, Some(link_id)) {
+                    defmt::info!(">> LinkOpen");
                     self.link_id.replace(link_id);
                     device.tx_link_ack(link_id).await;
                 }
@@ -50,6 +51,7 @@ impl<T: Transport + 'static> ProvisioningBearerControlHander<T> {
                 // ignorable for this role
             }
             ProvisioningBearerControl::LinkClose(reason) => {
+                defmt::info!(">> LinkClose");
                 self.link_id.take();
                 self.state = State::None;
             }
