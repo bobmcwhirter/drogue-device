@@ -6,32 +6,14 @@ use heapless::Vec;
 pub enum ProvisioningPDU {
     Invite(Invite),
     Capabilities(Capabilities),
-    Start {
-        algorithm: Algorithm,
-        public_key: PublicKey,
-        authentication_method: AuthenticationMethod,
-        authentication_action: OOBAction,
-        authentication_size: OOBSize,
-    },
-    PublicKey {
-        x: [u8; 32],
-        y: [u8; 32],
-    },
+    Start(Start),
+    PublicKey(PublicKey),
     InputComplete,
-    Confirmation {
-        confirmation: [u8; 16],
-    },
-    Random {
-        random: [u8; 16],
-    },
-    Data {
-        encrypted: [u8; 25],
-        mic: [u8; 8],
-    },
+    Confirmation(Confirmation),
+    Random(Random),
+    Data(Data),
     Complete,
-    Failed {
-        error_code: ErrorCode,
-    },
+    Failed(Failed),
 }
 
 #[derive(Format)]
@@ -41,7 +23,7 @@ pub struct Invite {
 
 impl Invite {
     pub fn parse(data: &[u8]) -> Result<Self, ()> {
-        if data.len() == 2 && data[0] == 0x00 {
+        if data.len() == 2 && data[0] == ProvisioningPDU::INVITE {
             Ok(Self {
                 attention_duration: data[1],
             })
@@ -65,7 +47,7 @@ pub struct Capabilities {
 
 impl Capabilities {
     fn parse(data: &[u8]) -> Result<Self, ()> {
-        if data.len() == 12 && data[0] == 0x01 {
+        if data.len() == 12 && data[0] == ProvisioningPDU::CAPABILITIES {
             let number_of_elements = data[1];
             let algorithms = Algorithms::parse(u16::from_be_bytes([data[2], data[3]]))?;
             let public_key_type = PublicKeyType::parse(data[4])?;
@@ -105,65 +87,25 @@ impl Capabilities {
     }
 }
 
-impl ProvisioningPDU {
-    pub fn parse(data: &[u8]) -> Result<Self, ()> {
-        if data.len() >= 1 {
-            match data[0] {
-                0x00 => Ok(Self::Invite(Invite::parse(data)?)),
-                0x01 => Ok(Self::Capabilities(Capabilities::parse(data)?)),
-                0x02 => Self::parse_provisioning_start(&data[1..]),
-                0x03 => Self::parse_provisioning_public_key(&data[1..]),
-                0x04 => {
-                    if data.len() == 1 {
-                        Self::parse_provisioning_input_complete()
-                    } else {
-                        Err(())
-                    }
-                }
-                0x05 => Self::parse_provisioning_confirmation(&data[1..]),
-                0x06 => Self::parse_random(&data[1..]),
-                0x07 => Self::parse_provisioning_data(&data[1..]),
-                0x08 => {
-                    if data.len() == 1 {
-                        Self::parse_complete()
-                    } else {
-                        Err(())
-                    }
-                }
-                0x09 => Self::parse_provisioning_failed(&data[1..]),
-                _ => Err(()),
-            }
-        } else {
-            Err(())
-        }
-    }
+#[derive(Format)]
+pub struct Start {
+    algorithm: Algorithm,
+    public_key: PublicKeySelected,
+    authentication_method: AuthenticationMethod,
+    authentication_action: OOBAction,
+    authentication_size: OOBSize,
+}
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
-        match self {
-            ProvisioningPDU::Invite(_) => {}
-            ProvisioningPDU::Capabilities(capabilities) => {
-                capabilities.emit(xmit);
-            }
-            ProvisioningPDU::Start { .. } => {}
-            ProvisioningPDU::PublicKey { .. } => {}
-            ProvisioningPDU::InputComplete => {}
-            ProvisioningPDU::Confirmation { .. } => {}
-            ProvisioningPDU::Random { .. } => {}
-            ProvisioningPDU::Data { .. } => {}
-            ProvisioningPDU::Complete => {}
-            ProvisioningPDU::Failed { .. } => {}
-        }
-    }
-
-    fn parse_provisioning_start(data: &[u8]) -> Result<Self, ()> {
-        if data.len() == 5 {
+impl Start {
+    fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() == 7 && data[0] == ProvisioningPDU::START {
             let algorithm = Algorithm::parse(data[0])?;
-            let public_key = PublicKey::parse(data[1])?;
+            let public_key = PublicKeySelected::parse(data[1])?;
             let authentication_method = AuthenticationMethod::parse(data[2])?;
             let authentication_action = OOBAction::parse(&authentication_method, data[3])?;
             let authentication_size =
                 Self::parse_authentication_size(&authentication_method, data[4])?;
-            Ok(Self::Start {
+            Ok(Self {
                 algorithm,
                 public_key,
                 authentication_method,
@@ -195,66 +137,163 @@ impl ProvisioningPDU {
             }
         }
     }
+}
 
-    fn parse_provisioning_public_key(data: &[u8]) -> Result<Self, ()> {
-        if data.len() != 64 {
+#[derive(Format)]
+pub struct PublicKey {
+    x: [u8; 32],
+    y: [u8; 32],
+}
+
+impl PublicKey {
+    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 65 && data[0] != ProvisioningPDU::PUBLIC_KEY {
             Err(())
         } else {
-            Ok(Self::PublicKey {
-                x: data[0..32].try_into().map_err(|_| ())?,
-                y: data[32..64].try_into().map_err(|_| ())?,
+            Ok(PublicKey {
+                x: data[1..33].try_into().map_err(|_| ())?,
+                y: data[33..65].try_into().map_err(|_| ())?,
+            })
+        }
+    }
+}
+
+#[derive(Format)]
+pub struct Confirmation {
+    confirmation: [u8; 16],
+}
+
+impl Confirmation {
+    fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 17 && data[0] != ProvisioningPDU::CONFIRMATION {
+            Err(())
+        } else {
+            Ok(Self {
+                confirmation: data[1..].try_into().map_err(|_| ())?,
+            })
+        }
+    }
+}
+
+#[derive(Format)]
+pub struct Random {
+    random: [u8; 16],
+}
+
+impl Random {
+    fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 17 && data[0] != ProvisioningPDU::RANDOM {
+            Err(())
+        } else {
+            Ok(Self {
+                random: data[1..].try_into().map_err(|_| ())?,
+            })
+        }
+    }
+}
+
+#[derive(Format)]
+pub struct Data {
+    encrypted: [u8; 25],
+    mic: [u8; 8],
+}
+
+impl Data {
+    fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 34 && data[0] != ProvisioningPDU::DATA {
+            Err(())
+        } else {
+            Ok(Self {
+                encrypted: data[1..26].try_into().map_err(|_| ())?,
+                mic: data[26..34].try_into().map_err(|_| ())?,
+            })
+        }
+    }
+}
+
+#[derive(Format)]
+pub struct Failed {
+    error_code: ErrorCode,
+}
+
+impl Failed {
+    fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 2 && data[0] != ProvisioningPDU::FAILED {
+            Err(())
+        } else {
+            Ok(Self {
+                error_code: ErrorCode::parse(data[1])?,
             })
         }
     }
 
-    fn parse_provisioning_input_complete() -> Result<Self, ()> {
-        Ok(Self::InputComplete)
-    }
+}
 
-    fn parse_provisioning_confirmation(data: &[u8]) -> Result<Self, ()> {
-        if data.len() != 16 {
-            Err(())
+impl ProvisioningPDU {
+    const INVITE: u8 = 0x00;
+    const CAPABILITIES: u8 = 0x01;
+    const START: u8 = 0x02;
+    const PUBLIC_KEY: u8 = 0x03;
+    const INPUT_COMPLETE: u8 = 0x04;
+    const CONFIRMATION: u8 = 0x05;
+    const RANDOM: u8 = 0x06;
+    const DATA: u8 = 0x07;
+    const COMPLETE: u8 = 0x08;
+    const FAILED: u8 = 0x09;
+
+    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+        if data.len() >= 1 {
+            match data[0] {
+                Self::INVITE => Ok(Self::Invite(Invite::parse(data)?)),
+                Self::CAPABILITIES => Ok(Self::Capabilities(Capabilities::parse(data)?)),
+                Self::START => Ok(Self::Start(Start::parse(data)?)),
+                Self::PUBLIC_KEY => Ok(Self::PublicKey(PublicKey::parse(data)?)),
+                Self::INPUT_COMPLETE => Self::parse_provisioning_input_complete(data),
+                Self::CONFIRMATION => Ok(Self::Confirmation(Confirmation::parse(data)?)),
+                Self::RANDOM => Ok(Self::Random(Random::parse(data)?)),
+                Self::DATA => Ok(Self::Data(Data::parse(data)?)),
+                Self::COMPLETE => Self::parse_complete(data),
+                Self::FAILED => Ok(Self::Failed( Failed::parse(data)?)),
+                _ => Err(()),
+            }
         } else {
-            Ok(Self::Confirmation {
-                confirmation: data.try_into().map_err(|_| ())?,
-            })
+            Err(())
         }
     }
 
-    fn parse_random(data: &[u8]) -> Result<Self, ()> {
-        if data.len() != 16 {
-            Err(())
-        } else {
-            Ok(Self::Random {
-                random: data.try_into().map_err(|_| ())?,
-            })
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+        match self {
+            ProvisioningPDU::Invite(_) => {}
+            ProvisioningPDU::Capabilities(capabilities) => {
+                capabilities.emit(xmit);
+            }
+            ProvisioningPDU::Start { .. } => {}
+            ProvisioningPDU::PublicKey { .. } => {}
+            ProvisioningPDU::InputComplete => {}
+            ProvisioningPDU::Confirmation { .. } => {}
+            ProvisioningPDU::Random { .. } => {}
+            ProvisioningPDU::Data { .. } => {}
+            ProvisioningPDU::Complete => {}
+            ProvisioningPDU::Failed { .. } => {}
         }
     }
 
-    fn parse_provisioning_data(data: &[u8]) -> Result<Self, ()> {
-        if data.len() != 33 {
-            Err(())
+    fn parse_provisioning_input_complete(data: &[u8]) -> Result<Self, ()> {
+        if data.len() == 1 && data[0] == Self::INPUT_COMPLETE {
+            Ok(Self::InputComplete)
         } else {
-            Ok(Self::Data {
-                encrypted: data[0..25].try_into().map_err(|_| ())?,
-                mic: data[25..33].try_into().map_err(|_| ())?,
-            })
+            Err(())
         }
     }
 
-    fn parse_complete() -> Result<Self, ()> {
-        Ok(Self::Complete)
-    }
-
-    fn parse_provisioning_failed(data: &[u8]) -> Result<Self, ()> {
-        if data.len() != 1 {
+    fn parse_complete(data: &[u8]) -> Result<Self, ()> {
+        if data.len() != 1 && data[0] != Self::COMPLETE {
             Err(())
         } else {
-            Ok(Self::Failed {
-                error_code: ErrorCode::parse(data[0])?,
-            })
+            Ok(Self::Complete)
         }
     }
+
 }
 
 #[derive(Format, Clone)]
@@ -355,12 +394,12 @@ impl PublicKeyType {
 }
 
 #[derive(Format)]
-pub enum PublicKey {
+pub enum PublicKeySelected {
     NoPublicKey,
     OOBPublicKey,
 }
 
-impl PublicKey {
+impl PublicKeySelected {
     pub fn parse(octet: u8) -> Result<Self, ()> {
         match octet {
             0x00 => Ok(Self::NoPublicKey),
