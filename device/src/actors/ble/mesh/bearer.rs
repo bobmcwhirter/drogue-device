@@ -10,21 +10,26 @@ use crate::drivers::ble::mesh::provisioning::Capabilities;
 use crate::drivers::ble::mesh::PB_ADV;
 use core::cell::UnsafeCell;
 use core::ptr::slice_from_raw_parts;
+use core::marker::PhantomData;
+use rand_core::{CryptoRng, RngCore};
 
-pub struct BleMeshBearer<T>
+pub struct BleMeshBearer<T, R>
 where
     T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
 {
     transport: T,
     start: ActorContext<Start<T>>,
     rx: ActorContext<Rx<T>>,
     tx: ActorContext<Tx<T>>,
     device: ActorContext<Device<T>>,
+    _marker: PhantomData<R>,
 }
 
-impl<T> BleMeshBearer<T>
+impl<T, R> BleMeshBearer<T, R>
 where
     T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
@@ -33,16 +38,18 @@ where
             rx: ActorContext::new(),
             tx: ActorContext::new(),
             device: ActorContext::new(),
+            _marker: PhantomData,
         }
     }
 }
 
-impl<T> Package for BleMeshBearer<T>
+impl<T, R> Package for BleMeshBearer<T, R>
 where
     T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
 {
     type Primary = Tx<T>;
-    type Configuration = (Uuid, Capabilities);
+    type Configuration = (R, Uuid, Capabilities);
 
     fn mount<S: ActorSpawner>(
         &'static self,
@@ -60,7 +67,7 @@ where
 
         let coordinator = self
             .device
-            .mount(spawner, Device::new(config.0, config.1, tx));
+            .mount(spawner, Device::new(config.0, config.1, config.2, tx));
 
         let rx = self.rx.mount(
             spawner,
@@ -159,7 +166,8 @@ impl<T: Transport + 'static> Actor for Tx<T> {
                             }
                             TxMessage::Transmit(payload) => {
                                 defmt::info!("<<<< Transmit {}", payload);
-                                self.transport.transmit(payload).await;
+                                let result = self.transport.transmit(payload).await;
+                                defmt::info!("<<<< - {}", result);
                             }
                         }
                     }

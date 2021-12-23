@@ -8,7 +8,8 @@ use embassy::executor::{SpawnToken, Spawner};
 use heapless::Vec;
 use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
-use nrf_softdevice::{raw, Softdevice};
+use nrf_softdevice::{random_bytes, raw, Softdevice};
+use rand_core::{CryptoRng, Error, RngCore};
 
 pub struct Nrf52BleMeshTransport {
     pub(crate) sd: &'static Softdevice,
@@ -49,6 +50,43 @@ impl Nrf52BleMeshTransport {
         let sd = Softdevice::enable(&config);
         sd
     }
+
+    pub fn rng(&self) -> SoftdeviceRng {
+        SoftdeviceRng {
+            sd: self.sd
+        }
+    }
+}
+
+pub struct SoftdeviceRng {
+    sd: &'static Softdevice
+}
+
+impl RngCore for SoftdeviceRng {
+    fn next_u32(&mut self) -> u32 {
+        let mut bytes = [0;4];
+        random_bytes(self.sd, &mut bytes);
+        u32::from_be_bytes(bytes)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut bytes = [0;8];
+        random_bytes(self.sd, &mut bytes);
+        u64::from_be_bytes(bytes)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        random_bytes(self.sd, dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        random_bytes(self.sd, dest);
+        Ok(())
+    }
+}
+
+impl CryptoRng for SoftdeviceRng {
+
 }
 
 impl Transport for Nrf52BleMeshTransport {
@@ -99,6 +137,7 @@ impl Transport for Nrf52BleMeshTransport {
     type TransmitFuture<'m> = impl Future<Output = ()> + 'm;
 
     fn transmit<'m>(&'m self, message: &'m [u8]) -> Self::TransmitFuture<'m> {
+        defmt::info!("****** NRF {} {:x}", message.len(), message);
         let adv =
             peripheral::NonconnectableAdvertisement::NonscannableUndirected { adv_data: message };
 
@@ -107,8 +146,8 @@ impl Transport for Nrf52BleMeshTransport {
                 self.sd,
                 adv,
                 &peripheral::Config {
-                    max_events: Some(3),
-                    interval: 100,
+                    max_events: Some(1),
+                    //interval: 100,
                     //timeout: Some(300),
                     ..Default::default()
                 },

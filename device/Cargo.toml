@@ -59,6 +59,9 @@ base64 = { version = "0.13.0", default-features = false }
 # Handy macros, e.g. drogue::config
 drogue-device-macros = { path = "../macros" }
 
+# BLE-Mesh
+p256 = { version = "0.10.0", default-features = false, optional=true }
+
 [dev-dependencies]
 embassy = { version = "0.1.0", features = ["std", "time", "time-tick-1mhz"]}
 #embassy = {path = "../../../embassy/embassy", features = ["std", "time", "time-tick-1mhz"]}
@@ -83,7 +86,9 @@ tls = ["drogue-tls"]
     "nrf-softdevice/ble-central",
     "nrf-softdevice/s140",
     "nrf-softdevice/nrf52840",
-    "nrf-softdevice-s140"
+    "nrf-softdevice-s140",
+    "p256",
+    "p256/arithmetic",
 ]
 
 "bsp+b_u585i_iot02a" = [ "embassy-stm32" ]

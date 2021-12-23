@@ -18,7 +18,7 @@ pub enum ProvisioningPDU {
 
 #[derive(Format)]
 pub struct Invite {
-    attention_duration: u8,
+    pub attention_duration: u8,
 }
 
 impl Invite {
@@ -75,7 +75,7 @@ impl Capabilities {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
-        xmit.push(0x01);
+        xmit.push(ProvisioningPDU::CAPABILITIES);
         xmit.push(self.number_of_elements);
         self.algorithms.emit(xmit);
         self.public_key_type.emit(xmit);
@@ -89,22 +89,22 @@ impl Capabilities {
 
 #[derive(Format)]
 pub struct Start {
-    algorithm: Algorithm,
-    public_key: PublicKeySelected,
-    authentication_method: AuthenticationMethod,
-    authentication_action: OOBAction,
-    authentication_size: OOBSize,
+    pub algorithm: Algorithm,
+    pub public_key: PublicKeySelected,
+    pub authentication_method: AuthenticationMethod,
+    pub authentication_action: OOBAction,
+    pub authentication_size: OOBSize,
 }
 
 impl Start {
     fn parse(data: &[u8]) -> Result<Self, ()> {
-        if data.len() == 7 && data[0] == ProvisioningPDU::START {
-            let algorithm = Algorithm::parse(data[0])?;
-            let public_key = PublicKeySelected::parse(data[1])?;
-            let authentication_method = AuthenticationMethod::parse(data[2])?;
-            let authentication_action = OOBAction::parse(&authentication_method, data[3])?;
+        if data.len() == 6 && data[0] == ProvisioningPDU::START {
+            let algorithm = Algorithm::parse(data[1])?;
+            let public_key = PublicKeySelected::parse(data[2])?;
+            let authentication_method = AuthenticationMethod::parse(data[3])?;
+            let authentication_action = OOBAction::parse(&authentication_method, data[4])?;
             let authentication_size =
-                Self::parse_authentication_size(&authentication_method, data[4])?;
+                Self::parse_authentication_size(&authentication_method, data[5])?;
             Ok(Self {
                 algorithm,
                 public_key,
@@ -141,8 +141,8 @@ impl Start {
 
 #[derive(Format)]
 pub struct PublicKey {
-    x: [u8; 32],
-    y: [u8; 32],
+    pub x: [u8; 32],
+    pub y: [u8; 32],
 }
 
 impl PublicKey {
@@ -156,11 +156,17 @@ impl PublicKey {
             })
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
+        xmit.push( ProvisioningPDU::PUBLIC_KEY );
+        xmit.extend_from_slice( &self.x );
+        xmit.extend_from_slice( &self.y );
+    }
 }
 
 #[derive(Format)]
 pub struct Confirmation {
-    confirmation: [u8; 16],
+    pub confirmation: [u8; 16],
 }
 
 impl Confirmation {
@@ -177,7 +183,7 @@ impl Confirmation {
 
 #[derive(Format)]
 pub struct Random {
-    random: [u8; 16],
+    pub random: [u8; 16],
 }
 
 impl Random {
@@ -194,7 +200,7 @@ impl Random {
 
 #[derive(Format)]
 pub struct Data {
-    encrypted: [u8; 25],
+    pub encrypted: [u8; 25],
     mic: [u8; 8],
 }
 
@@ -213,7 +219,7 @@ impl Data {
 
 #[derive(Format)]
 pub struct Failed {
-    error_code: ErrorCode,
+    pub error_code: ErrorCode,
 }
 
 impl Failed {
@@ -268,8 +274,12 @@ impl ProvisioningPDU {
                 capabilities.emit(xmit);
             }
             ProvisioningPDU::Start { .. } => {}
-            ProvisioningPDU::PublicKey { .. } => {}
-            ProvisioningPDU::InputComplete => {}
+            ProvisioningPDU::PublicKey(public_key) => {
+                public_key.emit(xmit);
+            }
+            ProvisioningPDU::InputComplete => {
+                xmit.push( Self::INPUT_COMPLETE );
+            }
             ProvisioningPDU::Confirmation { .. } => {}
             ProvisioningPDU::Random { .. } => {}
             ProvisioningPDU::Data { .. } => {}
@@ -369,7 +379,7 @@ pub struct PublicKeyType {
 
 impl Default for PublicKeyType {
     fn default() -> Self {
-        Self { available: true }
+        Self { available: false }
     }
 }
 

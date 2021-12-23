@@ -6,17 +6,27 @@ use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
 use core::future::Future;
 use heapless::Vec;
+use rand_core::{CryptoRng, RngCore};
 
 pub mod bearer;
 pub mod device;
 mod handlers;
+mod key;
 
-pub struct BleMesh<T: Transport + 'static> {
-    bearer: BleMeshBearer<T>,
+pub struct BleMesh<T, R>
+where
+    T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
+{
+    bearer: BleMeshBearer<T, R>,
     _noop: ActorContext<NoOp>,
 }
 
-impl<T: Transport + 'static> BleMesh<T> {
+impl<T, R> BleMesh<T, R>
+where
+    T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
+{
     pub fn new(transport: T) -> Self {
         Self {
             bearer: BleMeshBearer::new(transport),
@@ -25,9 +35,13 @@ impl<T: Transport + 'static> BleMesh<T> {
     }
 }
 
-impl<T: Transport + 'static> Package for BleMesh<T> {
+impl<T, R> Package for BleMesh<T, R>
+where
+    T: Transport + 'static,
+    R: CryptoRng + RngCore + 'static,
+{
     type Primary = NoOp;
-    type Configuration = (Uuid, Capabilities);
+    type Configuration = (R, Uuid, Capabilities);
 
     fn mount<S: ActorSpawner>(
         &'static self,

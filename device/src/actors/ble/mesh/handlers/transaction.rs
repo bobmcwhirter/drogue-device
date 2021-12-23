@@ -7,10 +7,13 @@ use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 use crate::drivers::ble::mesh::transport::Transport;
 use core::marker::PhantomData;
 use defmt::Format;
+use embassy::time::Duration;
 use heapless::Vec;
+use nrf_softdevice_s140::sd_evt_get;
 
 pub struct TransactionHandler<T: Transport + 'static> {
     inbound_segments: Option<InboundSegments>,
+    inbound_acks: Option<u8>,
     outbound_segments: Option<OutboundSegments>,
     _marker: PhantomData<T>,
 }
@@ -19,9 +22,43 @@ impl<T: Transport + 'static> TransactionHandler<T> {
     pub(crate) fn new() -> Self {
         Self {
             inbound_segments: None,
+            inbound_acks: None,
             outbound_segments: None,
             _marker: PhantomData,
         }
+    }
+
+    fn already_acked(&self, transaction_number: u8) -> bool {
+        if let Some(ack) = self.inbound_acks {
+            return transaction_number <= ack;
+        } else {
+            false
+        }
+    }
+
+    async fn check_ack(&mut self, device: &Device<T>, transaction_number: u8) -> Result<bool,()> {
+        if !self.already_acked(transaction_number) {
+            Ok(false)
+        } else {
+            self.do_ack(device, transaction_number).await?;
+            Ok(true)
+        }
+    }
+
+    async fn do_ack(&mut self, device: &Device<T>, transaction_number: u8) -> Result<(), ()> {
+        device.tx_transaction_ack(transaction_number).await?;
+        match self.inbound_acks {
+            None => {
+                self.inbound_acks.replace(transaction_number);
+            }
+            Some(latest) => {
+                // TODO fix wraparound rollover.
+                if transaction_number > latest {
+                    self.inbound_acks.replace(transaction_number);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn handle_transaction_start(
@@ -30,9 +67,14 @@ impl<T: Transport + 'static> TransactionHandler<T> {
         transaction_number: u8,
         transaction_start: &TransactionStart,
     ) -> Result<(), ()> {
+        if self.check_ack(device, transaction_number).await? {
+            return Ok(())
+        }
+
         if transaction_start.seg_n == 0 {
             let pdu = ProvisioningPDU::parse(&*transaction_start.data)?;
-            device.tx_transaction_ack(transaction_number).await?;
+            //device.tx_transaction_ack(transaction_number).await?;
+            self.do_ack(device, transaction_number).await?;
             device.handle_provisioning_pdu(pdu).await?;
         } else {
             self.inbound_segments = Some(InboundSegments::new(
@@ -51,12 +93,17 @@ impl<T: Transport + 'static> TransactionHandler<T> {
         transaction_number: u8,
         transaction_continuation: &TransactionContinuation,
     ) -> Result<(), ()> {
+
+        if self.check_ack(device, transaction_number).await? {
+            return Ok(())
+        }
+
         if self.inbound_segments.as_mut().ok_or(())?.receive(
             transaction_number,
             transaction_continuation.segment_index,
             &transaction_continuation.data,
         )? {
-            device.tx_transaction_ack(transaction_number).await?;
+            self.do_ack(device, transaction_number).await?;
 
             let mut data: Vec<u8, 1024> = Vec::new();
             self.inbound_segments.as_ref().ok_or(())?.fill(&mut data);
@@ -93,7 +140,11 @@ impl<T: Transport + 'static> TransactionHandler<T> {
         Ok(())
     }
 
-    pub(crate) async fn handle_transaction_ack(&mut self, device: &Device<T>, transaction_number: u8) -> Result<(),()>{
+    pub(crate) async fn handle_transaction_ack(
+        &mut self,
+        device: &Device<T>,
+        transaction_number: u8,
+    ) -> Result<(), ()> {
         match &self.outbound_segments {
             None => { /* nothing */ }
             Some(segments) => {
@@ -164,19 +215,28 @@ impl InboundSegments {
 struct OutboundSegments {
     transaction_number: u8,
     pdu: Vec<u8, 256>,
+    num_segments: u8,
     fcs: u8,
     // TODO remove this field.
     orig: ProvisioningPDU,
 }
+
+const TRANSACTION_START_MTU: usize = 20;
+const TRANSACTION_CONTINUATION_MTU: usize = 23;
+
 
 impl OutboundSegments {
     pub fn new(transaction_number: u8, pdu: ProvisioningPDU) -> Self {
         let mut data = Vec::new();
         pdu.emit(&mut data);
         let fcs = fcs(&data);
+        let num_segments = Self::num_chunks(&data);
+
+        defmt::info!("################ {}", num_segments);
         Self {
             transaction_number,
             pdu: data,
+            num_segments,
             fcs: fcs,
             orig: pdu,
         }
@@ -184,6 +244,21 @@ impl OutboundSegments {
 
     pub async fn transmit<T: Transport + 'static>(&self, device: &Device<T>) -> Result<(), ()> {
         defmt::info!("<< outbound << {}", self.orig);
+
+        let iter = OutboundSegmentsIter::new(self);
+
+        for pdu in iter {
+            //defmt::info!("PAUSE");
+            //embassy::time::Timer::after(Duration::from_millis(5000)).await;
+            //defmt::info!("PAUSE done");
+            device.tx_pdu( PDU {
+                link_id: device.link_id()?,
+                transaction_number: self.transaction_number,
+                pdu,
+            }).await;
+        }
+
+        /*
         let num_chunks = self.pdu.chunks(15).count();
         for (i, chunk) in self.pdu.chunks(15).enumerate() {
             let pdu = if i == 0 {
@@ -206,9 +281,95 @@ impl OutboundSegments {
                 pdu,
             };
 
-            device.tx_pdu(pdu).await;
+            device.tx_pdu(pdu).await?;
         }
+         */
         Ok(())
+    }
+
+    fn num_chunks(pdu: &[u8]) -> u8 {
+        defmt::info!("counting chunks for {}", pdu.len());
+        let mut len = pdu.len();
+        // TransactionStart can hold 20
+        if len <= TRANSACTION_START_MTU {
+            defmt::info!("simple 1");
+            return 1;
+        }
+        let mut num_chunks = 1;
+        len = len - TRANSACTION_START_MTU;
+        // TransactionContinuation can hold 24
+        while len > 0 {
+            num_chunks = num_chunks + 1;
+            if len > TRANSACTION_CONTINUATION_MTU {
+                len = len - TRANSACTION_CONTINUATION_MTU;
+            } else {
+                break
+            }
+        }
+
+        num_chunks
+    }
+}
+
+struct OutboundSegmentsIter<'a> {
+    segments: &'a OutboundSegments,
+    cur: usize,
+}
+
+impl<'a> OutboundSegmentsIter<'a> {
+    fn new(segments: &'a OutboundSegments) -> Self {
+        Self {
+            segments,
+            cur: 0
+        }
+    }
+}
+
+impl<'a> Iterator for OutboundSegmentsIter<'a> {
+    type Item = GenericProvisioningPDU;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cur = self.cur;
+        self.cur = self.cur + 1;
+
+        if cur == 0 {
+            let chunk = if self.segments.pdu.len() <= TRANSACTION_START_MTU {
+                &self.segments.pdu
+            } else {
+                &self.segments.pdu[0..TRANSACTION_START_MTU]
+            };
+
+            defmt::info!("chunk 0: len={}", chunk.len());
+
+            Some(
+                GenericProvisioningPDU::TransactionStart(TransactionStart {
+                    seg_n: self.segments.num_segments as u8 - 1,
+                    total_len: self.segments.pdu.len() as u16,
+                    fcs: self.segments.fcs,
+                    data: Vec::from_slice(chunk).ok()?,
+                })
+            )
+        } else {
+            defmt::info!("cur = {}", cur);
+            let chunk_start = TRANSACTION_START_MTU + ((cur-1) * TRANSACTION_CONTINUATION_MTU);
+            defmt::info!("chunk {}: start={}", cur, chunk_start);
+            if chunk_start >= self.segments.pdu.len() {
+                defmt::info!("chunk {}: None", cur);
+                None
+            } else {
+                let chunk_end = chunk_start + TRANSACTION_CONTINUATION_MTU;
+                let chunk = if chunk_end <= self.segments.pdu.len() {
+                    &self.segments.pdu[chunk_start..chunk_end]
+                } else {
+                    &self.segments.pdu[chunk_start..]
+                };
+                Some(
+                    GenericProvisioningPDU::TransactionContinuation(TransactionContinuation {
+                    segment_index: cur as u8,
+                    data: Vec::from_slice(chunk).ok()?,
+                }))
+            }
+        }
     }
 }
 

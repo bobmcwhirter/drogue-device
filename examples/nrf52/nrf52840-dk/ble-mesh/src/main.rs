@@ -8,7 +8,7 @@
 use defmt_rtt as _;
 
 use drogue_device::actors::ble::mesh::BleMesh;
-use drogue_device::drivers::ble::mesh::controller::nrf52::Nrf52BleMeshTransport;
+use drogue_device::drivers::ble::mesh::controller::nrf52::{Nrf52BleMeshTransport, SoftdeviceRng};
 use drogue_device::drivers::ble::mesh::device::Uuid;
 use drogue_device::drivers::ble::mesh::provisioning::{
     Algorithms, Capabilities, InputOOBActions, OOBSize, OutputOOBActions, PublicKeyType,
@@ -25,6 +25,9 @@ use embassy_nrf::{
     gpio::{AnyPin, Output},
     Peripherals,
 };
+use embassy_nrf::rng::Rng;
+use embassy_nrf::interrupt;
+
 use nrf_softdevice::Softdevice;
 
 use panic_probe as _;
@@ -33,7 +36,7 @@ use heapless::Vec;
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
-    mesh: BleMesh<Nrf52BleMeshTransport>,
+    mesh: BleMesh<Nrf52BleMeshTransport, SoftdeviceRng>,
 }
 
 static DEVICE: DeviceContext<MyDevice> = DeviceContext::new();
@@ -52,9 +55,12 @@ const NODE_UUID: Uuid = Uuid([
 
 #[embassy::main(config = "config()")]
 async fn main(spawner: Spawner, p: Peripherals) {
+    let transport = Nrf52BleMeshTransport::new();
+    let rng = transport.rng();
+
     let device = DEVICE.configure(MyDevice {
         led: ActorContext::new(),
-        mesh: BleMesh::new(Nrf52BleMeshTransport::new()),
+        mesh: BleMesh::new(transport)
     });
 
     let capabilities = Capabilities {
@@ -68,7 +74,7 @@ async fn main(spawner: Spawner, p: Peripherals) {
         input_oob_action: InputOOBActions::default(),
     };
 
-    device.mesh.mount((NODE_UUID, capabilities), spawner);
+    device.mesh.mount((rng, NODE_UUID, capabilities), spawner);
 
     defmt::info!("Started");
 }

@@ -3,6 +3,7 @@ use super::handlers::TransactionHandler;
 use crate::actors::ble::mesh::bearer::TxMessage::Transmit;
 use crate::actors::ble::mesh::bearer::{Tx, TxMessage};
 use crate::actors::ble::mesh::handlers::ProvisioningHandler;
+use crate::actors::ble::mesh::key::Key;
 use crate::drivers::ble::mesh::bearer::advertising;
 use crate::drivers::ble::mesh::bearer::advertising::{PBAdvError, PDU};
 use crate::drivers::ble::mesh::device::Uuid;
@@ -21,6 +22,8 @@ use futures::future::{select, Either};
 use futures::{pin_mut, StreamExt};
 use heapless::spsc::Queue;
 use heapless::Vec;
+use p256::PublicKey;
+use rand_core::RngCore;
 
 enum State {
     Unprovisioned,
@@ -28,22 +31,31 @@ enum State {
     Provisioned,
 }
 
-pub struct Device<T: Transport + 'static> {
+pub struct Device<T>
+where
+    T: Transport + 'static,
+{
     pub(crate) uuid: Uuid,
     capabilities: Capabilities,
     transaction_number: AtomicU8,
     state: State,
     tx: Address<Tx<T>>,
     ticker: Ticker,
-    // Handlers
+    // Crypto
+    key: Key,
+    // Transport
     outbound: RefCell<Option<ProvisioningPDU>>,
+    // Handlers
     provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T>>,
     transaction: RefCell<TransactionHandler<T>>,
     provisioning: RefCell<ProvisioningHandler<T>>,
 }
 
-impl<T: Transport + 'static> Device<T> {
-    pub fn new(uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
+impl<T> Device<T>
+where
+    T: Transport + 'static,
+{
+    pub fn new<R: RngCore>(rng: R, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
         Self {
             uuid,
             capabilities,
@@ -51,6 +63,7 @@ impl<T: Transport + 'static> Device<T> {
             state: State::Unprovisioned,
             tx,
             ticker: Ticker::every(Duration::from_secs(3)),
+            key: Key::new(rng),
             outbound: RefCell::new(None),
             provisioning_bearer_control: RefCell::new(ProvisioningBearerControlHander::new()),
             transaction: RefCell::new(TransactionHandler::new()),
@@ -58,10 +71,14 @@ impl<T: Transport + 'static> Device<T> {
         }
     }
 
+    pub(crate) fn public_key(&self) -> PublicKey {
+        self.key.public_key()
+    }
+
     pub(crate) fn next_transaction(&self) -> u8 {
-        self.transaction_number
-            .compare_exchange(0x7F, 0x00, Ordering::Acquire, Ordering::Relaxed);
-        self.transaction_number.load(Ordering::Relaxed)
+        let num = self.transaction_number.load(Ordering::SeqCst);
+        self.transaction_number.fetch_add(1, Ordering::SeqCst);
+        num
     }
 
     pub(crate) fn link_id(&self) -> Result<u32, ()> {
@@ -70,6 +87,7 @@ impl<T: Transport + 'static> Device<T> {
 
     pub(crate) async fn tx(&self, data: &[u8]) -> Result<(), ()> {
         self.tx.request(TxMessage::Transmit(data)).unwrap().await;
+        defmt::info!("TRANSMITTED");
         Ok(())
     }
 
@@ -100,6 +118,10 @@ impl<T: Transport + 'static> Device<T> {
         .await
     }
 
+    pub(crate) fn tx_provisioning_pdu(&self, pdu: ProvisioningPDU) {
+        self.outbound.borrow_mut().replace(pdu);
+    }
+
     pub(crate) fn tx_capabilities(&self) -> Result<(), ()> {
         let pdu = ProvisioningPDU::Capabilities(self.capabilities.clone());
         self.outbound.borrow_mut().replace(pdu);
@@ -107,6 +129,7 @@ impl<T: Transport + 'static> Device<T> {
     }
 
     pub(crate) async fn handle_provisioning_pdu(&self, pdu: ProvisioningPDU) -> Result<(), ()> {
+        defmt::info!("handle_provisioning_pdu: {}", pdu);
         self.provisioning.borrow_mut().handle(self, pdu).await?;
         Ok(())
     }
