@@ -11,25 +11,25 @@ use crate::drivers::ble::mesh::PB_ADV;
 use core::cell::UnsafeCell;
 use core::ptr::slice_from_raw_parts;
 use core::marker::PhantomData;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::RngCore;
 
 pub struct BleMeshBearer<T, R>
 where
     T: Transport + 'static,
-    R: CryptoRng + RngCore + 'static,
+    R: RngCore + 'static,
 {
     transport: T,
     start: ActorContext<Start<T>>,
-    rx: ActorContext<Rx<T>>,
+    rx: ActorContext<Rx<T, R>>,
     tx: ActorContext<Tx<T>>,
-    device: ActorContext<Device<T>>,
+    device: ActorContext<Device<T, R>>,
     _marker: PhantomData<R>,
 }
 
 impl<T, R> BleMeshBearer<T, R>
 where
     T: Transport + 'static,
-    R: CryptoRng + RngCore + 'static,
+    R: RngCore + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
@@ -46,7 +46,7 @@ where
 impl<T, R> Package for BleMeshBearer<T, R>
 where
     T: Transport + 'static,
-    R: CryptoRng + RngCore + 'static,
+    R: RngCore + 'static,
 {
     type Primary = Tx<T>;
     type Configuration = (R, Uuid, Capabilities);
@@ -83,7 +83,7 @@ where
 
 struct Start<T: Transport + 'static>(&'static T);
 
-impl<T: Transport + 'static> Actor for Start<T> {
+impl<T> Actor for Start<T> where T: Transport + 'static {
     type OnMountFuture<'m, M>
     where
         Self: 'm,
@@ -101,17 +101,19 @@ impl<T: Transport + 'static> Actor for Start<T> {
     }
 }
 
-struct Rx<T>
+struct Rx<T, R>
 where
     T: Transport + 'static,
+    R: RngCore + 'static,
 {
     transport: &'static T,
-    handler: Address<Device<T>>,
+    handler: Address<Device<T,R>>,
 }
 
-impl<T> Actor for Rx<T>
+impl<T, R> Actor for Rx<T, R>
 where
     T: Transport + 'static,
+    R: RngCore + 'static,
 {
     type OnMountFuture<'m, M>
     where

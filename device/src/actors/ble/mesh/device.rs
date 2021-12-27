@@ -3,7 +3,7 @@ use super::handlers::TransactionHandler;
 use crate::actors::ble::mesh::bearer::TxMessage::Transmit;
 use crate::actors::ble::mesh::bearer::{Tx, TxMessage};
 use crate::actors::ble::mesh::handlers::ProvisioningHandler;
-use crate::actors::ble::mesh::key::Key;
+use crate::actors::ble::mesh::key_manager::KeyManager;
 use crate::drivers::ble::mesh::bearer::advertising;
 use crate::drivers::ble::mesh::bearer::advertising::{PBAdvError, PDU};
 use crate::drivers::ble::mesh::device::Uuid;
@@ -31,31 +31,35 @@ enum State {
     Provisioned,
 }
 
-pub struct Device<T>
+pub struct Device<T, R>
 where
     T: Transport + 'static,
+    R: RngCore + 'static,
 {
     pub(crate) uuid: Uuid,
-    capabilities: Capabilities,
+    pub(crate) capabilities: Capabilities,
     transaction_number: AtomicU8,
     state: State,
     tx: Address<Tx<T>>,
     ticker: Ticker,
     // Crypto
-    key: Key,
+    rng: RefCell<R>,
+    key_manager: KeyManager,
     // Transport
     outbound: RefCell<Option<ProvisioningPDU>>,
     // Handlers
-    provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T>>,
-    transaction: RefCell<TransactionHandler<T>>,
-    provisioning: RefCell<ProvisioningHandler<T>>,
+    provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T, R>>,
+    transaction: RefCell<TransactionHandler<T, R>>,
+    provisioning: RefCell<ProvisioningHandler<T, R>>,
 }
 
-impl<T> Device<T>
+impl<T, R> Device<T, R>
 where
     T: Transport + 'static,
+    R: RngCore + 'static,
 {
-    pub fn new<R: RngCore>(rng: R, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
+    pub fn new(mut rng: R, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
+        let key_manager = KeyManager::new(&mut rng);
         Self {
             uuid,
             capabilities,
@@ -63,7 +67,8 @@ where
             state: State::Unprovisioned,
             tx,
             ticker: Ticker::every(Duration::from_secs(3)),
-            key: Key::new(rng),
+            key_manager,
+            rng: RefCell::new(rng),
             outbound: RefCell::new(None),
             provisioning_bearer_control: RefCell::new(ProvisioningBearerControlHander::new()),
             transaction: RefCell::new(TransactionHandler::new()),
@@ -72,13 +77,23 @@ where
     }
 
     pub(crate) fn public_key(&self) -> PublicKey {
-        self.key.public_key()
+        self.key_manager.public_key()
     }
 
     pub(crate) fn next_transaction(&self) -> u8 {
         let num = self.transaction_number.load(Ordering::SeqCst);
         self.transaction_number.fetch_add(1, Ordering::SeqCst);
         num
+    }
+
+    pub(crate) fn next_random_u32(&self) -> u32 {
+        self.rng.borrow_mut().next_u32()
+    }
+
+    pub(crate) fn next_random_u8(&self) -> u8 {
+        let mut bytes = [0;1];
+        self.rng.borrow_mut().fill_bytes(&mut bytes);
+        bytes[0]
     }
 
     pub(crate) fn link_id(&self) -> Result<u32, ()> {
@@ -144,13 +159,21 @@ where
     }
 }
 
-impl<T: Transport + 'static> Handler for Address<Device<T>> {
+impl<T, R> Handler for Address<Device<T, R>>
+where
+    T: Transport + 'static,
+    R: RngCore + 'static,
+{
     fn handle<'m>(&self, message: Vec<u8, 384>) {
         self.notify(message);
     }
 }
 
-impl<T: Transport + 'static> Actor for Device<T> {
+impl<T, R> Actor for Device<T, R>
+where
+    T: Transport + 'static,
+    R: RngCore + 'static,
+{
     type Message<'m> = Vec<u8, 384>;
     type OnMountFuture<'m, M>
     where

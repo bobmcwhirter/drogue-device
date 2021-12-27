@@ -6,20 +6,29 @@ use crate::drivers::ble::mesh::generic_provisioning::{
 use crate::drivers::ble::mesh::transport::Transport;
 use core::marker::PhantomData;
 use heapless::Vec;
+use rand_core::RngCore;
 
 enum State {
     None,
     LinkOpen,
 }
 
-pub struct ProvisioningBearerControlHander<T: Transport + 'static> {
+pub struct ProvisioningBearerControlHander<T, R>
+where
+    T: Transport + 'static,
+    R: RngCore,
+{
     state: State,
     pub(crate) link_id: Option<u32>,
     transaction_number: u8,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<(T, R)>,
 }
 
-impl<T: Transport + 'static> ProvisioningBearerControlHander<T> {
+impl<T,R> ProvisioningBearerControlHander<T, R>
+where
+    T: Transport + 'static,
+    R: RngCore,
+{
     pub(crate) fn new() -> Self {
         Self {
             state: State::None,
@@ -31,7 +40,7 @@ impl<T: Transport + 'static> ProvisioningBearerControlHander<T> {
 
     pub(crate) async fn handle(
         &mut self,
-        device: &Device<T>,
+        device: &Device<T, R>,
         link_id: u32,
         pbc: &ProvisioningBearerControl,
     ) {

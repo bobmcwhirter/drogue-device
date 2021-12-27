@@ -11,7 +11,7 @@ use rand_core::{CryptoRng, RngCore};
 pub mod bearer;
 pub mod device;
 mod handlers;
-mod key;
+mod key_manager;
 
 pub struct BleMesh<T, R>
 where

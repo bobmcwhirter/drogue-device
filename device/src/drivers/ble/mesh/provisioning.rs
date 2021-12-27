@@ -31,6 +31,12 @@ impl Invite {
             Err(())
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.push( ProvisioningPDU::INVITE );
+        xmit.push( self.attention_duration );
+        Ok(())
+    }
 }
 
 #[derive(Format, Clone)]
@@ -74,7 +80,7 @@ impl Capabilities {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         xmit.push(ProvisioningPDU::CAPABILITIES);
         xmit.push(self.number_of_elements);
         self.algorithms.emit(xmit);
@@ -84,10 +90,11 @@ impl Capabilities {
         self.output_oob_action.emit(xmit);
         self.input_oob_size.emit(xmit);
         self.input_oob_action.emit(xmit);
+        Ok(())
     }
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub struct Start {
     pub algorithm: Algorithm,
     pub public_key: PublicKeySelected,
@@ -137,9 +144,19 @@ impl Start {
             }
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.push( ProvisioningPDU::START);
+        self.algorithm.emit( xmit );
+        self.public_key.emit( xmit );
+        self.authentication_method.emit( xmit );
+        self.authentication_action.emit( xmit );
+        self.authentication_size.emit( xmit );
+        Ok(())
+    }
 }
 
-#[derive(Format)]
+#[derive(Format, Copy, Clone)]
 pub struct PublicKey {
     pub x: [u8; 32],
     pub y: [u8; 32],
@@ -157,10 +174,11 @@ impl PublicKey {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) -> Result<(), ()>{
         xmit.push( ProvisioningPDU::PUBLIC_KEY );
         xmit.extend_from_slice( &self.x );
         xmit.extend_from_slice( &self.y );
+        Ok(())
     }
 }
 
@@ -319,6 +337,16 @@ impl Algorithm {
             Err(())
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        match self {
+            Algorithm::P256 => {
+                xmit.push( 0x00 ).map_err(|_|())?
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Format, Clone)]
@@ -403,7 +431,7 @@ impl PublicKeyType {
     }
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub enum PublicKeySelected {
     NoPublicKey,
     OOBPublicKey,
@@ -416,6 +444,15 @@ impl PublicKeySelected {
             0x01 => Ok(Self::OOBPublicKey),
             _ => Err(()),
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        match self {
+            PublicKeySelected::NoPublicKey => xmit.push( 0x00 ).map_err(|_|())?,
+            PublicKeySelected::OOBPublicKey => xmit.push( 0x01 ).map_err(|_|())?,
+        }
+
+        Ok(())
     }
 }
 
@@ -498,6 +535,10 @@ impl OutputOOBAction {
             0x04 => Ok(Self::OutputAlphanumeric),
             _ => Err(()),
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|())
     }
 }
 
@@ -582,6 +623,10 @@ impl InputOOBAction {
             0x03 => Ok(Self::InputAlphanumeric),
             _ => Err(()),
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|())
     }
 }
 
@@ -669,9 +714,24 @@ impl OOBAction {
             }
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        match self {
+            OOBAction::None => xmit.push(0x00).map_err(|_|())?,
+            OOBAction::Output(action) => {
+                action.emit(xmit)?;
+            }
+            OOBAction::Input(action) => {
+                action.emit(xmit)?;
+            }
+        }
+
+        Ok(())
+
+    }
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub enum AuthenticationMethod {
     NoOOBAuthentication = 0x00,
     StaticOOBAuthentication = 0x01,
@@ -688,6 +748,16 @@ impl AuthenticationMethod {
             0x03 => Ok(Self::InputOOBAuthentication),
             _ => Err(()),
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        match self {
+            AuthenticationMethod::NoOOBAuthentication => xmit.push(0x00).map_err(|_|())?,
+            AuthenticationMethod::StaticOOBAuthentication => xmit.push(0x01).map_err(|_|())?,
+            AuthenticationMethod::OutputOOBAuthentication => xmit.push(0x02).map_err(|_|())?,
+            AuthenticationMethod::InputOOBAuthentication => xmit.push(0x03).map_err(|_|())?,
+        }
+        Ok(())
     }
 }
 

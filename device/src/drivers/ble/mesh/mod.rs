@@ -14,3 +14,4 @@ pub mod pdu;
 pub mod provisioning;
 pub mod status;
 pub mod transport;
+pub mod crypto;

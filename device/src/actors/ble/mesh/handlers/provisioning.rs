@@ -1,10 +1,15 @@
 use crate::actors::ble::mesh::device::Device;
-use crate::drivers::ble::mesh::provisioning::{ProvisioningPDU, PublicKey};
+use crate::actors::ble::mesh::handlers::transcript::Transcript;
+use crate::drivers::ble::mesh::provisioning::{
+    InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Start,
+};
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
+use heapless::Vec;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::elliptic_curve::AffineXCoordinate;
+use rand_core::RngCore;
 
 enum State {
     None,
@@ -20,45 +25,130 @@ enum State {
     Failed,
 }
 
-pub struct ProvisioningHandler<T: Transport + 'static> {
-    state: State,
-    _marker: PhantomData<T>,
+pub enum AuthValue {
+    None,
+    InputEvents(u32),
+    OutputEvents(u32),
+    InputNumeric(Vec<u8, 8>),
+    InputAlphanumeric(Vec<u8, 8>),
+    OutputNumeric(Vec<u8, 8>),
+    OutputAlphanumeric(Vec<u8, 8>),
 }
 
-impl<T: Transport + 'static> ProvisioningHandler<T> {
+fn power_of_10(exp: u8) -> u32 {
+    let mut cur = exp;
+    let mut pow = 1;
+
+    loop {
+        if cur == 1 {
+            return pow;
+        } else {
+            pow = pow * 10
+        }
+        cur = cur - 1;
+    }
+}
+
+impl AuthValue {
+    pub fn get_bytes(&self) -> [u8; 16] {
+        let mut bytes = [0; 16];
+        match self {
+            AuthValue::None => {
+                // all zeros
+            }
+            AuthValue::InputEvents(num) | AuthValue::OutputEvents(num) => {
+                let num_bytes = num.to_be_bytes();
+                bytes[12] = num_bytes[0];
+                bytes[13] = num_bytes[1];
+                bytes[14] = num_bytes[2];
+                bytes[15] = num_bytes[3];
+            }
+            AuthValue::InputNumeric(digits) | AuthValue::OutputNumeric(digits) => {
+                let width = digits.len();
+
+                let mut number = 0;
+
+                for (i, digit) in digits.iter().enumerate() {
+                    let exp = (width - 1) - i;
+                    let multiplier = power_of_10(exp as u8);
+                    number = number + (multiplier * (*digit as u32)) as u128;
+                }
+
+                let number_bytes = number.to_be_bytes();
+                for (i, byte) in number_bytes.iter().enumerate() {
+                    bytes[i] = *byte;
+                }
+            }
+            AuthValue::InputAlphanumeric(chars) | AuthValue::OutputAlphanumeric(chars) => {
+                for (i, byte) in chars.iter().enumerate() {
+                    bytes[i] = *byte
+                }
+            }
+        }
+
+        bytes
+    }
+}
+
+pub struct ProvisioningHandler<T, R>
+where
+    T: Transport + 'static,
+    R: RngCore,
+{
+    state: State,
+    transcript: Transcript,
+    auth_value: Option<AuthValue>,
+    _marker: PhantomData<(T, R)>,
+}
+
+impl<T, R> ProvisioningHandler<T, R>
+where
+    T: Transport + 'static,
+    R: RngCore,
+{
     pub(crate) fn new() -> Self {
         Self {
             state: State::None,
+            transcript: Transcript::new(),
+            auth_value: None,
             _marker: PhantomData,
         }
     }
 
     pub(crate) async fn handle(
         &mut self,
-        device: &Device<T>,
+        device: &Device<T, R>,
         pdu: ProvisioningPDU,
     ) -> Result<(), ()> {
         match pdu {
             ProvisioningPDU::Invite(invite) => {
                 defmt::info!(">> ProvisioningPDU::Invite");
                 self.state = State::Invite;
+                self.transcript.add_invite(&invite);
                 device.tx_capabilities()?;
+                self.transcript.add_capabilities(&device.capabilities);
             }
             ProvisioningPDU::Capabilities(_) => {}
             ProvisioningPDU::Start(start) => {
                 defmt::info!(">> ProvisioningPDU::Start");
+                self.transcript.add_start(&start);
+                let auth_value = self.determine_auth_value(device, &start);
+                // TODO actually let the device/app/thingy know what it is so that it can blink/flash/accept input
+                self.auth_value.replace(auth_value);
             }
             ProvisioningPDU::PublicKey(public_key) => {
                 defmt::info!(">> ProvisioningPDU::PublicKey");
+                self.transcript.add_pubkey_provisioner(&public_key);
                 let pk = device.public_key();
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
                 let y = xy.y().unwrap();
-                device.tx_provisioning_pdu(ProvisioningPDU::PublicKey(PublicKey {
+                let pk = PublicKey {
                     x: <[u8; 32]>::try_from(x.as_slice()).map_err(|_| ())?,
                     y: <[u8; 32]>::try_from(y.as_slice()).map_err(|_| ())?,
-                }));
-                //device.tx_provisioning_pdu(ProvisioningPDU::InputComplete);
+                };
+                self.transcript.add_pubkey_device(&pk);
+                device.tx_provisioning_pdu(ProvisioningPDU::PublicKey(pk));
             }
             ProvisioningPDU::InputComplete => {
                 defmt::info!(">> ProvisioningPDU::InputComplete");
@@ -80,5 +170,96 @@ impl<T: Transport + 'static> ProvisioningHandler<T> {
             }
         }
         Ok(())
+    }
+
+    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> AuthValue {
+        match (&start.authentication_action, &start.authentication_size) {
+            (
+                OOBAction::Output(OutputOOBAction::Blink)
+                | OOBAction::Output(OutputOOBAction::Beep)
+                | OOBAction::Output(OutputOOBAction::Vibrate),
+                OOBSize::MaximumSize(size),
+            ) => {
+                let auth_raw = self.random_physical_oob(&device, *size);
+                AuthValue::OutputEvents(auth_raw)
+            }
+            (
+                OOBAction::Input(InputOOBAction::Push) | OOBAction::Input(InputOOBAction::Twist),
+                OOBSize::MaximumSize(size),
+            ) => {
+                let auth_raw = self.random_physical_oob(&device, *size);
+                AuthValue::InputEvents(auth_raw)
+            }
+            (OOBAction::Output(OutputOOBAction::OutputNumeric), OOBSize::MaximumSize(size)) => {
+                let auth_raw = self.random_numeric(&device, *size);
+                AuthValue::OutputNumeric(auth_raw)
+            }
+            (OOBAction::Input(InputOOBAction::InputNumeric), OOBSize::MaximumSize(size)) => {
+                let auth_raw = self.random_numeric(&device, *size);
+                AuthValue::InputNumeric(auth_raw)
+            }
+            (
+                OOBAction::Output(OutputOOBAction::OutputAlphanumeric),
+                OOBSize::MaximumSize(size),
+            ) => {
+                let auth_raw = self.random_alphanumeric(&device, *size);
+                AuthValue::OutputAlphanumeric(auth_raw)
+            }
+            (OOBAction::Input(InputOOBAction::InputAlphanumeric), OOBSize::MaximumSize(size)) => {
+                let auth_raw = self.random_alphanumeric(&device, *size);
+                AuthValue::InputAlphanumeric(auth_raw)
+            }
+            _ => {
+                // zeros!
+                AuthValue::None
+            }
+        }
+    }
+
+    fn random_physical_oob(&self, device: &Device<T, R>, size: u8) -> u32 {
+        // "select a random integer between 0 and 10 to the power of the Authentication Size exclusive"
+        //
+        // ... which could be an absolute metric tonne of beeps/twists/pushes if AuthSize is large-ish.
+        let mut max = 1;
+        for _ in 0..size {
+            max = max * 10;
+        }
+
+        loop {
+            let candidate = device.next_random_u32();
+            if candidate > 0 && candidate < max {
+                return candidate;
+            }
+        }
+    }
+
+    fn random_numeric(&self, device: &Device<T, R>, size: u8) -> Vec<u8, 8> {
+        let mut random = Vec::new();
+        for _ in 0..size {
+            loop {
+                let candidate = device.next_random_u8();
+                if candidate <= 9 {
+                    random.push(candidate);
+                }
+            }
+        }
+        random
+    }
+
+    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Vec<u8, 8> {
+        let mut random = Vec::new();
+        for _ in 0..size {
+            loop {
+                let candidate = device.next_random_u8();
+                if candidate >= 64 && candidate <= 90 {
+                    // Capital ASCII letters A-Z
+                    random.push(candidate);
+                } else if candidate >= 48 && candidate <= 57 {
+                    // ASCII numbers 0-9
+                    random.push(candidate);
+                }
+            }
+        }
+        random
     }
 }
