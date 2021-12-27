@@ -44,7 +44,7 @@ where
     ticker: Ticker,
     // Crypto
     rng: RefCell<R>,
-    key_manager: KeyManager,
+    pub(crate) key_manager: KeyManager,
     // Transport
     outbound: RefCell<Option<ProvisioningPDU>>,
     // Handlers

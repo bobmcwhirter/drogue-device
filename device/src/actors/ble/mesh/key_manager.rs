@@ -1,9 +1,13 @@
+use crate::drivers::ble::mesh::crypto::k1;
+use aes::Aes128;
+use cmac::crypto_mac::Output;
+use cmac::Cmac;
 use p256::elliptic_curve::ecdh::{diffie_hellman, SharedSecret};
 use p256::{NistP256, PublicKey, SecretKey};
 use rand_core::{CryptoRng, Error, RngCore};
 
 pub struct KeyManager {
-    random: [u8;16],
+    pub(crate) random: [u8; 16],
     private_key: SecretKey,
     peer_public_key: Option<PublicKey>,
     shared_secret: Option<SharedSecret<NistP256>>,
@@ -15,7 +19,7 @@ impl KeyManager {
         R: RngCore,
     {
         let mut wrapper = RngWrapper(rng);
-        let mut random = [0;16];
+        let mut random = [0; 16];
         wrapper.fill_bytes(&mut random);
         let secret = SecretKey::random(&mut wrapper);
         Self {
@@ -31,9 +35,15 @@ impl KeyManager {
     }
 
     pub fn add_peer_public_key(&mut self, pk: PublicKey) {
-        self.shared_secret
-            .replace(diffie_hellman(&self.private_key.to_nonzero_scalar(), pk.as_affine()));
+        self.shared_secret.replace(diffie_hellman(
+            &self.private_key.to_nonzero_scalar(),
+            pk.as_affine(),
+        ));
         self.peer_public_key.replace(pk);
+    }
+
+    pub fn k1(&self, salt: &[u8], p: &[u8]) -> Result<Output<Cmac<Aes128>>, ()> {
+        k1(self.shared_secret.as_ref().ok_or(())?.as_bytes(), salt, p)
     }
 }
 

@@ -55,7 +55,7 @@ impl Transcript {
         self.bytes.as_slice()
     }
 
-    fn confirmation_salt(&self) -> Result<Output<Cmac<Aes128>>,()> {
+    pub(crate) fn confirmation_salt(&self) -> Result<Output<Cmac<Aes128>>,()> {
         s1(self.confirmation_inputs())
     }
 }

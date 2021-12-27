@@ -1,8 +1,6 @@
 use crate::actors::ble::mesh::device::Device;
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
-use crate::drivers::ble::mesh::provisioning::{
-    InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Start,
-};
+use crate::drivers::ble::mesh::provisioning::{Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Start};
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
@@ -10,6 +8,7 @@ use heapless::Vec;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::elliptic_curve::AffineXCoordinate;
 use rand_core::RngCore;
+use crate::drivers::ble::mesh::crypto::aes_cmac;
 
 enum State {
     None,
@@ -29,24 +28,10 @@ pub enum AuthValue {
     None,
     InputEvents(u32),
     OutputEvents(u32),
-    InputNumeric(Vec<u8, 8>),
+    InputNumeric(u32),
+    OutputNumeric(u32),
     InputAlphanumeric(Vec<u8, 8>),
-    OutputNumeric(Vec<u8, 8>),
     OutputAlphanumeric(Vec<u8, 8>),
-}
-
-fn power_of_10(exp: u8) -> u32 {
-    let mut cur = exp;
-    let mut pow = 1;
-
-    loop {
-        if cur == 1 {
-            return pow;
-        } else {
-            pow = pow * 10
-        }
-        cur = cur - 1;
-    }
 }
 
 impl AuthValue {
@@ -56,28 +41,12 @@ impl AuthValue {
             AuthValue::None => {
                 // all zeros
             }
-            AuthValue::InputEvents(num) | AuthValue::OutputEvents(num) => {
+            AuthValue::InputEvents(num) | AuthValue::OutputEvents(num) | AuthValue::InputNumeric(num) | AuthValue::OutputNumeric(num) => {
                 let num_bytes = num.to_be_bytes();
                 bytes[12] = num_bytes[0];
                 bytes[13] = num_bytes[1];
                 bytes[14] = num_bytes[2];
                 bytes[15] = num_bytes[3];
-            }
-            AuthValue::InputNumeric(digits) | AuthValue::OutputNumeric(digits) => {
-                let width = digits.len();
-
-                let mut number = 0;
-
-                for (i, digit) in digits.iter().enumerate() {
-                    let exp = (width - 1) - i;
-                    let multiplier = power_of_10(exp as u8);
-                    number = number + (multiplier * (*digit as u32)) as u128;
-                }
-
-                let number_bytes = number.to_be_bytes();
-                for (i, byte) in number_bytes.iter().enumerate() {
-                    bytes[i] = *byte;
-                }
             }
             AuthValue::InputAlphanumeric(chars) | AuthValue::OutputAlphanumeric(chars) => {
                 for (i, byte) in chars.iter().enumerate() {
@@ -155,6 +124,7 @@ where
             }
             ProvisioningPDU::Confirmation(confirmation) => {
                 defmt::info!(">> ProvisioningPDU::Confirmation {}", confirmation);
+                device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(self.confirmation_device(device)?))
             }
             ProvisioningPDU::Random(random) => {
                 defmt::info!(">> ProvisioningPDU::Random");
@@ -170,6 +140,24 @@ where
             }
         }
         Ok(())
+    }
+
+    fn confirmation_device(&self, device: &Device<T,R>) -> Result<Confirmation,()> {
+        let salt = self.transcript.confirmation_salt()?;
+        let confirmation_key = device.key_manager.k1( &*salt.into_bytes(), b"prck")?;
+        let mut bytes: Vec<u8,32> = Vec::new();
+        bytes.extend_from_slice(&device.key_manager.random);
+        bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(())?.get_bytes());
+        let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
+
+        let mut confirmation = [0;16];
+        for (i, byte) in confirmation_device.into_bytes().iter().enumerate() {
+            confirmation[i] = *byte;
+        }
+
+        Ok(Confirmation{
+            confirmation,
+        })
     }
 
     fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> AuthValue {
@@ -233,17 +221,42 @@ where
         }
     }
 
-    fn random_numeric(&self, device: &Device<T, R>, size: u8) -> Vec<u8, 8> {
-        let mut random = Vec::new();
-        for _ in 0..size {
-            loop {
-                let candidate = device.next_random_u8();
-                if candidate <= 9 {
-                    random.push(candidate);
+    fn random_numeric(&self, device: &Device<T, R>, size: u8) -> u32 {
+        loop {
+            let candidate = device.next_random_u32();
+
+            match size {
+                1 => if candidate < 10 {
+                        return candidate
+                    }
+                2 => if candidate < 100 {
+                    return candidate
                 }
+                3 => if candidate < 1_000 {
+                    return candidate
+                }
+                4 => if candidate < 10_000 {
+                    return candidate
+                }
+                5 => if candidate < 100_000 {
+                    return candidate
+                }
+                6 => if candidate < 1_000_000 {
+                    return candidate
+                }
+                7 => if candidate < 10_000_000 {
+                    return candidate
+                }
+                8 => if candidate < 100_000_000 {
+                    return candidate
+                }
+                _ => {
+                    // should never get here, but...
+                    return 0
+                }
+
             }
         }
-        random
     }
 
     fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Vec<u8, 8> {
