@@ -62,7 +62,8 @@ drogue-device-macros = { path = "../macros" }
 # BLE-Mesh
 p256 = { version = "0.10.0", default-features = false, optional=true }
 cmac = { version = "0.6.0", default-features = false, optional=true }
-aes = { version = "0.7.5", default-features = false, optional = true }
+aes = { version = "0.7", default-features = false, optional = true }
+ccm = { version = "0.4.4", default-features = false, optional = true }
 
 [dev-dependencies]
 embassy = { version = "0.1.0", features = ["std", "time", "time-tick-1mhz"]}
@@ -94,6 +95,8 @@ tls = ["drogue-tls"]
     "p256/ecdh",
     "cmac",
     "aes",
+    "ccm",
+    "ccm/heapless",
 ]
 
 "bsp+b_u585i_iot02a" = [ "embassy-stm32" ]

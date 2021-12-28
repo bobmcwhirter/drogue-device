@@ -22,6 +22,7 @@ impl KeyManager {
         let mut wrapper = RngWrapper(rng);
         let mut random = [0; 16];
         wrapper.fill_bytes(&mut random);
+        defmt::info!("**************************** {}", random);
         let secret = SecretKey::random(&mut wrapper);
         Self {
             random,

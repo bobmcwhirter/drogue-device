@@ -231,7 +231,7 @@ impl Random {
 #[derive(Format)]
 pub struct Data {
     pub encrypted: [u8; 25],
-    mic: [u8; 8],
+    pub mic: [u8; 8],
 }
 
 impl Data {
@@ -317,7 +317,9 @@ impl ProvisioningPDU {
                 random.emit(xmit);
             }
             ProvisioningPDU::Data { .. } => {}
-            ProvisioningPDU::Complete => {}
+            ProvisioningPDU::Complete => {
+                xmit.push(Self::COMPLETE);
+            }
             ProvisioningPDU::Failed { .. } => {}
         }
     }

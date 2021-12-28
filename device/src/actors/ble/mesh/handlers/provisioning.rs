@@ -1,6 +1,10 @@
 use crate::actors::ble::mesh::device::Device;
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
-use crate::drivers::ble::mesh::provisioning::{Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Random, Start};
+use crate::drivers::ble::mesh::crypto::{aes_ccm_decrypt, aes_cmac, CryptoBuffer, s1};
+use crate::drivers::ble::mesh::provisioning::{
+    Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey,
+    Random, Start,
+};
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
@@ -9,7 +13,6 @@ use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::elliptic_curve::AffineXCoordinate;
 use p256::EncodedPoint;
 use rand_core::RngCore;
-use crate::drivers::ble::mesh::crypto::aes_cmac;
 
 enum State {
     None,
@@ -42,7 +45,10 @@ impl AuthValue {
             AuthValue::None => {
                 // all zeros
             }
-            AuthValue::InputEvents(num) | AuthValue::OutputEvents(num) | AuthValue::InputNumeric(num) | AuthValue::OutputNumeric(num) => {
+            AuthValue::InputEvents(num)
+            | AuthValue::OutputEvents(num)
+            | AuthValue::InputNumeric(num)
+            | AuthValue::OutputNumeric(num) => {
                 let num_bytes = num.to_be_bytes();
                 bytes[12] = num_bytes[0];
                 bytes[13] = num_bytes[1];
@@ -68,6 +74,7 @@ where
     state: State,
     transcript: Transcript,
     auth_value: Option<AuthValue>,
+    random_provisioner: Option<[u8;16]>,
     _marker: PhantomData<(T, R)>,
 }
 
@@ -81,6 +88,7 @@ where
             state: State::None,
             transcript: Transcript::new(),
             auth_value: None,
+            random_provisioner: None,
             _marker: PhantomData,
         }
     }
@@ -88,7 +96,7 @@ where
     pub(crate) async fn handle(
         &mut self,
         device: &Device<T, R>,
-        pdu: ProvisioningPDU,
+        mut pdu: ProvisioningPDU,
     ) -> Result<(), ()> {
         match pdu {
             ProvisioningPDU::Invite(invite) => {
@@ -110,9 +118,13 @@ where
                 defmt::info!(">> ProvisioningPDU::PublicKey");
                 self.transcript.add_pubkey_provisioner(&public_key);
                 // TODO remove unwrap
-                let peer_pk = p256::PublicKey::from_encoded_point(
-                    &EncodedPoint::from_affine_coordinates(&public_key.x.into(), &public_key.y.into(), false)
-                ).unwrap();
+                let peer_pk =
+                    p256::PublicKey::from_encoded_point(&EncodedPoint::from_affine_coordinates(
+                        &public_key.x.into(),
+                        &public_key.y.into(),
+                        false,
+                    ))
+                    .unwrap();
                 device.key_manager.add_peer_public_key(peer_pk);
                 let pk = device.public_key();
                 let xy = pk.to_encoded_point(false);
@@ -136,14 +148,41 @@ where
             }
             ProvisioningPDU::Random(random) => {
                 defmt::info!(">> ProvisioningPDU::Random");
-                device.tx_provisioning_pdu( ProvisioningPDU::Random(
-                    Random {
-                        random: device.key_manager.random
-                    }
-                ));
+                device.tx_provisioning_pdu(ProvisioningPDU::Random(Random {
+                    random: device.key_manager.random,
+                }));
+                self.random_provisioner.replace( random.random );
             }
-            ProvisioningPDU::Data(data) => {
+            ProvisioningPDU::Data(ref mut data) => {
                 defmt::info!(">> ProvisioningPDU::Data");
+
+                let mut provisioning_salt = [0; 48];
+                provisioning_salt[0..16].copy_from_slice( &self.transcript.confirmation_salt()?.into_bytes());
+                provisioning_salt[16..32].copy_from_slice( self.random_provisioner.as_ref().unwrap() );
+                provisioning_salt[32..48].copy_from_slice( &device.key_manager.random );
+                let provisioning_salt = &s1( &provisioning_salt )?.into_bytes()[0..];
+
+                defmt::info!("prov-salt {:x}", provisioning_salt);
+
+                let session_key = &device.key_manager.k1( &provisioning_salt, b"prsk")?.into_bytes()[0..];
+                let session_nonce = &device.key_manager.k1( &provisioning_salt, b"prsn")?.into_bytes()[3..];
+
+                defmt::info!("session key {:x}", session_key);
+                defmt::info!("session nonce {:x}", session_nonce);
+                defmt::info!("encrypted {:x}", data.encrypted);
+
+                //let mut buffer = CryptoBuffer::<128>::from_slice(&data.encrypted)?;
+                //let result = aes_ccm_decrypt(&session_key, &session_nonce, &mut buffer, &data.mic);
+                let result = aes_ccm_decrypt(&session_key, &session_nonce, &mut data.encrypted, &data.mic);
+                match result {
+                    Ok(_) => {
+                        defmt::info!("decrypted!");
+                    }
+                    Err(_) => {
+                        defmt::info!("decryption error!");
+                    }
+                }
+                device.tx_provisioning_pdu(ProvisioningPDU::Complete);
             }
             ProvisioningPDU::Complete => {
                 defmt::info!(">> ProvisioningPDU::Complete");
@@ -155,13 +194,13 @@ where
         Ok(())
     }
 
-    fn confirmation_device(&self, device: &Device<T,R>) -> Result<Confirmation,()> {
+    fn confirmation_device(&self, device: &Device<T, R>) -> Result<Confirmation, ()> {
         defmt::info!("confirmation_device A");
         let salt = self.transcript.confirmation_salt()?;
         defmt::info!("confirmation_device B");
-        let confirmation_key = device.key_manager.k1( &*salt.into_bytes(), b"prck")?;
+        let confirmation_key = device.key_manager.k1(&*salt.into_bytes(), b"prck")?;
         defmt::info!("confirmation_device C");
-        let mut bytes: Vec<u8,32> = Vec::new();
+        let mut bytes: Vec<u8, 32> = Vec::new();
         defmt::info!("confirmation_device D");
         bytes.extend_from_slice(&device.key_manager.random);
         defmt::info!("confirmation_device E");
@@ -170,16 +209,14 @@ where
         let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
         defmt::info!("confirmation_device G");
 
-        let mut confirmation = [0;16];
+        let mut confirmation = [0; 16];
         defmt::info!("confirmation_device H");
         for (i, byte) in confirmation_device.into_bytes().iter().enumerate() {
             confirmation[i] = *byte;
         }
         defmt::info!("confirmation_device I");
 
-        Ok(Confirmation{
-            confirmation,
-        })
+        Ok(Confirmation { confirmation })
     }
 
     fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> AuthValue {
@@ -249,35 +286,50 @@ where
             let candidate = device.next_random_u32();
 
             match size {
-                1 => if candidate < 10 {
-                        return candidate
+                1 => {
+                    if candidate < 10 {
+                        return candidate;
                     }
-                2 => if candidate < 100 {
-                    return candidate
                 }
-                3 => if candidate < 1_000 {
-                    return candidate
+                2 => {
+                    if candidate < 100 {
+                        return candidate;
+                    }
                 }
-                4 => if candidate < 10_000 {
-                    return candidate
+                3 => {
+                    if candidate < 1_000 {
+                        return candidate;
+                    }
                 }
-                5 => if candidate < 100_000 {
-                    return candidate
+                4 => {
+                    if candidate < 10_000 {
+                        return candidate;
+                    }
                 }
-                6 => if candidate < 1_000_000 {
-                    return candidate
+                5 => {
+                    if candidate < 100_000 {
+                        return candidate;
+                    }
                 }
-                7 => if candidate < 10_000_000 {
-                    return candidate
+                6 => {
+                    if candidate < 1_000_000 {
+                        return candidate;
+                    }
                 }
-                8 => if candidate < 100_000_000 {
-                    return candidate
+                7 => {
+                    if candidate < 10_000_000 {
+                        return candidate;
+                    }
+                }
+                8 => {
+                    if candidate < 100_000_000 {
+                        return candidate;
+                    }
                 }
                 _ => {
                     // should never get here, but...
-                    return 0
+                    return 0;
                 }
-
             }
         }
     }
