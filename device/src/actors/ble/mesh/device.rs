@@ -134,6 +134,7 @@ where
     }
 
     pub(crate) fn tx_provisioning_pdu(&self, pdu: ProvisioningPDU) {
+        defmt::info!("NEXT OUTBOUND {}", pdu);
         self.outbound.borrow_mut().replace(pdu);
     }
 

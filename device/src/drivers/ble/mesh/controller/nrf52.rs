@@ -164,7 +164,11 @@ impl Transport for Nrf52BleMeshTransport {
 
     fn start_receive<'m, H: Handler + 'm>(&'m self, handler: &'m H) -> Self::ReceiveFuture<'m, H> {
         async move {
-            let config = ScanConfig::default();
+            //let config = ScanConfig::default();
+            let config = ScanConfig {
+                interval: 200,
+                ..Default::default()
+            };
             loop {
                 let result = central::scan::<_, ()>(self.sd, &config, |event| {
                     let data = event.data;

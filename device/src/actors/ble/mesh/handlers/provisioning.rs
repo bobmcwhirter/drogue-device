@@ -1,12 +1,13 @@
 use crate::actors::ble::mesh::device::Device;
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
-use crate::drivers::ble::mesh::provisioning::{Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Start};
+use crate::drivers::ble::mesh::provisioning::{Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey, Random, Start};
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
 use heapless::Vec;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::elliptic_curve::AffineXCoordinate;
+use p256::EncodedPoint;
 use rand_core::RngCore;
 use crate::drivers::ble::mesh::crypto::aes_cmac;
 
@@ -108,6 +109,11 @@ where
             ProvisioningPDU::PublicKey(public_key) => {
                 defmt::info!(">> ProvisioningPDU::PublicKey");
                 self.transcript.add_pubkey_provisioner(&public_key);
+                // TODO remove unwrap
+                let peer_pk = p256::PublicKey::from_encoded_point(
+                    &EncodedPoint::from_affine_coordinates(&public_key.x.into(), &public_key.y.into(), false)
+                ).unwrap();
+                device.key_manager.add_peer_public_key(peer_pk);
                 let pk = device.public_key();
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
@@ -124,10 +130,17 @@ where
             }
             ProvisioningPDU::Confirmation(confirmation) => {
                 defmt::info!(">> ProvisioningPDU::Confirmation {}", confirmation);
-                device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(self.confirmation_device(device)?))
+                let confirmation_device = self.confirmation_device(device);
+                defmt::info!(">>>>>>>>> {}", confirmation_device);
+                device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(confirmation_device?));
             }
             ProvisioningPDU::Random(random) => {
                 defmt::info!(">> ProvisioningPDU::Random");
+                device.tx_provisioning_pdu( ProvisioningPDU::Random(
+                    Random {
+                        random: device.key_manager.random
+                    }
+                ));
             }
             ProvisioningPDU::Data(data) => {
                 defmt::info!(">> ProvisioningPDU::Data");
@@ -143,17 +156,26 @@ where
     }
 
     fn confirmation_device(&self, device: &Device<T,R>) -> Result<Confirmation,()> {
+        defmt::info!("confirmation_device A");
         let salt = self.transcript.confirmation_salt()?;
+        defmt::info!("confirmation_device B");
         let confirmation_key = device.key_manager.k1( &*salt.into_bytes(), b"prck")?;
+        defmt::info!("confirmation_device C");
         let mut bytes: Vec<u8,32> = Vec::new();
+        defmt::info!("confirmation_device D");
         bytes.extend_from_slice(&device.key_manager.random);
+        defmt::info!("confirmation_device E");
         bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(())?.get_bytes());
+        defmt::info!("confirmation_device F");
         let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
+        defmt::info!("confirmation_device G");
 
         let mut confirmation = [0;16];
+        defmt::info!("confirmation_device H");
         for (i, byte) in confirmation_device.into_bytes().iter().enumerate() {
             confirmation[i] = *byte;
         }
+        defmt::info!("confirmation_device I");
 
         Ok(Confirmation{
             confirmation,
@@ -182,6 +204,7 @@ where
                 let auth_raw = self.random_numeric(&device, *size);
                 AuthValue::OutputNumeric(auth_raw)
             }
+            // TODO actually dispatch to device/app/thing's UI for inputs instead of just making up shit.
             (OOBAction::Input(InputOOBAction::InputNumeric), OOBSize::MaximumSize(size)) => {
                 let auth_raw = self.random_numeric(&device, *size);
                 AuthValue::InputNumeric(auth_raw)

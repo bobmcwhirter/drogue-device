@@ -1,3 +1,4 @@
+use core::cell::RefCell;
 use crate::drivers::ble::mesh::crypto::k1;
 use aes::Aes128;
 use cmac::crypto_mac::Output;
@@ -9,8 +10,8 @@ use rand_core::{CryptoRng, Error, RngCore};
 pub struct KeyManager {
     pub(crate) random: [u8; 16],
     private_key: SecretKey,
-    peer_public_key: Option<PublicKey>,
-    shared_secret: Option<SharedSecret<NistP256>>,
+    peer_public_key: RefCell<Option<PublicKey>>,
+    shared_secret: RefCell<Option<SharedSecret<NistP256>>>,
 }
 
 impl KeyManager {
@@ -25,8 +26,8 @@ impl KeyManager {
         Self {
             random,
             private_key: secret,
-            peer_public_key: None,
-            shared_secret: None,
+            peer_public_key: RefCell::new(None),
+            shared_secret: RefCell::new(None),
         }
     }
 
@@ -34,16 +35,19 @@ impl KeyManager {
         self.private_key.public_key()
     }
 
-    pub fn add_peer_public_key(&mut self, pk: PublicKey) {
-        self.shared_secret.replace(diffie_hellman(
+    pub fn add_peer_public_key(&self, pk: PublicKey) {
+        self.shared_secret.borrow_mut().replace(diffie_hellman(
             &self.private_key.to_nonzero_scalar(),
             pk.as_affine(),
         ));
-        self.peer_public_key.replace(pk);
+        self.peer_public_key.borrow_mut().replace(pk);
     }
 
     pub fn k1(&self, salt: &[u8], p: &[u8]) -> Result<Output<Cmac<Aes128>>, ()> {
-        k1(self.shared_secret.as_ref().ok_or(())?.as_bytes(), salt, p)
+        defmt::info!("km.k1 -A");
+        let result = k1(self.shared_secret.borrow().as_ref().ok_or(())?.as_bytes(), salt, p);
+        defmt::info!("km.k1 -B");
+        result
     }
 }
 

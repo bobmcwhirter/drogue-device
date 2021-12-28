@@ -81,6 +81,7 @@ where
         transaction_start: &TransactionStart,
     ) -> Result<(), ()> {
         if self.check_ack(device, transaction_number).await? {
+            defmt::info!("ALREADY ACKd {}", transaction_number);
             return Ok(());
         }
 

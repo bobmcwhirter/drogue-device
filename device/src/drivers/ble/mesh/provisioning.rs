@@ -197,6 +197,12 @@ impl Confirmation {
             })
         }
     }
+
+    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.push( ProvisioningPDU::CONFIRMATION );
+        xmit.extend_from_slice(&self.confirmation);
+        Ok(())
+    }
 }
 
 #[derive(Format)]
@@ -213,6 +219,12 @@ impl Random {
                 random: data[1..].try_into().map_err(|_| ())?,
             })
         }
+    }
+
+    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),()> {
+        xmit.push( ProvisioningPDU::RANDOM );
+        xmit.extend_from_slice( &self.random);
+        Ok(())
     }
 }
 
@@ -298,8 +310,12 @@ impl ProvisioningPDU {
             ProvisioningPDU::InputComplete => {
                 xmit.push( Self::INPUT_COMPLETE );
             }
-            ProvisioningPDU::Confirmation { .. } => {}
-            ProvisioningPDU::Random { .. } => {}
+            ProvisioningPDU::Confirmation(confirmation) => {
+                confirmation.emit(xmit);
+            }
+            ProvisioningPDU::Random(random) => {
+                random.emit(xmit);
+            }
             ProvisioningPDU::Data { .. } => {}
             ProvisioningPDU::Complete => {}
             ProvisioningPDU::Failed { .. } => {}
