@@ -90,7 +90,6 @@ impl<T> Actor for Start<T> where T: Transport + 'static {
         M: Inbox<Self> + 'm,
     {
         async move {
-            defmt::info!("transport START");
             self.0.start().await;
         }
     }
@@ -162,9 +161,7 @@ impl<T: Transport + 'static> Actor for Tx<T> {
                                 self.transport.send_unprovisioned_beacon(*uuid).await;
                             }
                             TxMessage::Transmit(payload) => {
-                                defmt::info!("<<<< Transmit {}", payload);
-                                let result = self.transport.transmit(payload).await;
-                                defmt::info!("<<<< - {}", result);
+                                self.transport.transmit(payload).await;
                             }
                         }
                     }

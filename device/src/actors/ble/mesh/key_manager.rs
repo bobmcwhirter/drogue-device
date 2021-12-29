@@ -1,11 +1,12 @@
 use core::cell::RefCell;
 use crate::drivers::ble::mesh::crypto::k1;
 use aes::Aes128;
-use cmac::crypto_mac::Output;
+use cmac::crypto_mac::{InvalidKeyLength, Output};
 use cmac::Cmac;
 use p256::elliptic_curve::ecdh::{diffie_hellman, SharedSecret};
 use p256::{NistP256, PublicKey, SecretKey};
 use rand_core::{CryptoRng, Error, RngCore};
+use crate::actors::ble::mesh::device::DeviceError;
 
 pub struct KeyManager {
     pub(crate) random: [u8; 16],
@@ -21,13 +22,7 @@ impl KeyManager {
     {
         let mut wrapper = RngWrapper(rng);
         let mut random = [0; 16];
-        loop {
-            if let Ok(()) = wrapper.try_fill_bytes(&mut random) {
-                break;
-            }
-        }
-
-        defmt::info!("**************************** {}", random);
+        wrapper.fill_bytes(&mut random);
         let secret = SecretKey::random(&mut wrapper);
         Self {
             random,
@@ -49,11 +44,8 @@ impl KeyManager {
         self.peer_public_key.borrow_mut().replace(pk);
     }
 
-    pub fn k1(&self, salt: &[u8], p: &[u8]) -> Result<Output<Cmac<Aes128>>, ()> {
-        defmt::info!("km.k1 -A");
-        let result = k1(self.shared_secret.borrow().as_ref().ok_or(())?.as_bytes(), salt, p);
-        defmt::info!("km.k1 -B");
-        result
+    pub fn k1(&self, salt: &[u8], p: &[u8]) -> Result<Output<Cmac<Aes128>>, DeviceError> {
+        Ok(k1(self.shared_secret.borrow().as_ref().ok_or(DeviceError::NoSharedSecret)?.as_bytes(), salt, p)?)
     }
 }
 

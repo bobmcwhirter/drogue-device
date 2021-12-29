@@ -67,6 +67,4 @@ async fn main(spawner: Spawner, _p: Peripherals) {
     };
 
     device.mesh.mount((rng, NODE_UUID, capabilities), spawner);
-
-    defmt::info!("Started");
 }

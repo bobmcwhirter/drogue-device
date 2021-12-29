@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use rand_core::RngCore;
 
-use crate::actors::ble::mesh::device::Device;
+use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::drivers::ble::mesh::generic_provisioning::ProvisioningBearerControl;
 use crate::drivers::ble::mesh::transport::Transport;
 
@@ -12,9 +12,9 @@ enum State {
 }
 
 pub struct ProvisioningBearerControlHander<T, R>
-    where
-        T: Transport + 'static,
-        R: RngCore,
+where
+    T: Transport + 'static,
+    R: RngCore,
 {
     state: State,
     pub(crate) link_id: Option<u32>,
@@ -23,9 +23,9 @@ pub struct ProvisioningBearerControlHander<T, R>
 }
 
 impl<T, R> ProvisioningBearerControlHander<T, R>
-    where
-        T: Transport + 'static,
-        R: RngCore,
+where
+    T: Transport + 'static,
+    R: RngCore,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -41,7 +41,7 @@ impl<T, R> ProvisioningBearerControlHander<T, R>
         device: &Device<T, R>,
         link_id: u32,
         pbc: &ProvisioningBearerControl,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         match pbc {
             ProvisioningBearerControl::LinkOpen(uuid) => {
                 if *uuid != device.uuid {
@@ -49,22 +49,33 @@ impl<T, R> ProvisioningBearerControlHander<T, R>
                     return Ok(());
                 }
 
-                if matches!(self.link_id, None) || matches!(self.link_id, Some(self_link_id) if link_id == self_link_id) {
-                    defmt::info!(">> LinkOpen");
+                if matches!(self.link_id, None) {
+                    defmt::trace!(">> LinkOpen({})", link_id);
                     self.link_id.replace(link_id);
                     device.tx_link_ack(link_id).await
+                } else if matches!(self.link_id, Some(self_link_id) if link_id != self_link_id) {
+                    // Something bad has happened?
+                    defmt::debug!("LinkOpen with different link_id");
+                    device.link_close();
+                    self.link_id.take();
+                    self.state = State::None;
+                    Err(DeviceError::InvalidLink)
                 } else {
-                    Ok(())
+                    // Re-ACK it.
+                    device.tx_link_ack(link_id).await
                 }
             }
             ProvisioningBearerControl::LinkAck => {
-                Ok(())
                 // ignorable for this role
+                Ok(())
             }
-            ProvisioningBearerControl::LinkClose(_reason) => {
-                defmt::info!(">> LinkClose");
-                self.link_id.take();
-                self.state = State::None;
+            ProvisioningBearerControl::LinkClose(reason) => {
+                if let Some(_) = self.link_id {
+                    defmt::trace!(">> LinkClose {}", reason);
+                    device.link_close();
+                    self.link_id.take();
+                    self.state = State::None;
+                }
                 Ok(())
             }
         }

@@ -1,6 +1,7 @@
 use crate::drivers::ble::mesh::device::Uuid;
 use defmt::Format;
 use heapless::Vec;
+use crate::drivers::ble::mesh::InsufficientBuffer;
 
 #[derive(Format)]
 pub enum GenericProvisioningPDU {
@@ -36,11 +37,11 @@ impl TransactionStart {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push(self.seg_n << 2).map_err(|_| ())?;
-        xmit.extend_from_slice(&self.total_len.to_be_bytes()).map_err(|_| ())?;
-        xmit.push(self.fcs).map_err(|_| ())?;
-        xmit.extend_from_slice(&*self.data).map_err(|_| ())?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.push(self.seg_n << 2).map_err(|_| InsufficientBuffer)?;
+        xmit.extend_from_slice(&self.total_len.to_be_bytes()).map_err(|_| InsufficientBuffer)?;
+        xmit.push(self.fcs).map_err(|_| InsufficientBuffer)?;
+        xmit.extend_from_slice(&*self.data).map_err(|_| InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -65,9 +66,9 @@ impl TransactionContinuation {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push(self.segment_index << 2 | 0b10).map_err(|_| ())?;
-        xmit.extend_from_slice(&*self.data).map_err(|_| ())?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.push(self.segment_index << 2 | 0b10).map_err(|_| InsufficientBuffer)?;
+        xmit.extend_from_slice(&*self.data).map_err(|_| InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -98,14 +99,14 @@ impl GenericProvisioningPDU {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
             GenericProvisioningPDU::TransactionStart(tx_start) => {
                 tx_start.emit(xmit)?;
             }
             GenericProvisioningPDU::TransactionAck => {
                 // Ack is simple.
-                xmit.push(0b00000001).map_err(|_| ())?;
+                xmit.push(0b00000001).map_err(|_| InsufficientBuffer)?;
             }
             GenericProvisioningPDU::TransactionContinuation(tx_cont) => {
                 tx_cont.emit(xmit)?;
@@ -148,11 +149,11 @@ impl ProvisioningBearerControl {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
             ProvisioningBearerControl::LinkOpen(_) => {}
             ProvisioningBearerControl::LinkAck => {
-                xmit.push(0x01 << 2 | 0b11).map_err(|_| ())?;
+                xmit.push(0x01 << 2 | 0b11).map_err(|_| InsufficientBuffer)?;
             }
             ProvisioningBearerControl::LinkClose(_) => {}
         }

@@ -7,15 +7,17 @@ use crate::drivers::ble::mesh::bearer::advertising;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::generic_provisioning::{
-    GenericProvisioningPDU, ProvisioningBearerControl
+    GenericProvisioningPDU, ProvisioningBearerControl,
 };
-use crate::drivers::ble::mesh::provisioning::{Capabilities, ProvisioningPDU};
+use crate::drivers::ble::mesh::provisioning::{Capabilities, ParseError, ProvisioningPDU};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
-use crate::drivers::ble::mesh::PB_ADV;
+use crate::drivers::ble::mesh::{InsufficientBuffer, PB_ADV};
 use crate::{Actor, Address, Inbox};
+use cmac::crypto_mac::InvalidKeyLength;
 use core::cell::RefCell;
 use core::future::Future;
 use core::sync::atomic::{AtomicU8, Ordering};
+use defmt::Format;
 use embassy::time::{Duration, Ticker};
 use futures::future::{select, Either};
 use futures::{pin_mut, StreamExt};
@@ -29,10 +31,41 @@ enum State {
     Provisioned,
 }
 
+#[derive(Format)]
+pub enum DeviceError {
+    InvalidPacket,
+    InsufficientBuffer,
+    InvalidLink,
+    NoEstablishedLink,
+    InvalidKeyLength,
+    InvalidTransactionNumber,
+    IncompleteTransaction,
+    NoSharedSecret,
+    ParseError(ParseError),
+}
+
+impl From<InsufficientBuffer> for DeviceError {
+    fn from(_: InsufficientBuffer) -> Self {
+        Self::InsufficientBuffer
+    }
+}
+
+impl From<InvalidKeyLength> for DeviceError {
+    fn from(_: InvalidKeyLength) -> Self {
+        Self::InvalidKeyLength
+    }
+}
+
+impl From<ParseError> for DeviceError {
+    fn from(inner: ParseError) -> Self {
+        Self::ParseError(inner)
+    }
+}
+
 pub struct Device<T, R>
-where
-    T: Transport + 'static,
-    R: RngCore + 'static,
+    where
+        T: Transport + 'static,
+        R: RngCore + 'static,
 {
     pub(crate) uuid: Uuid,
     pub(crate) capabilities: Capabilities,
@@ -52,9 +85,9 @@ where
 }
 
 impl<T, R> Device<T, R>
-where
-    T: Transport + 'static,
-    R: RngCore + 'static,
+    where
+        T: Transport + 'static,
+        R: RngCore + 'static,
 {
     pub fn new(mut rng: R, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
         let key_manager = KeyManager::new(&mut rng);
@@ -89,28 +122,33 @@ where
     }
 
     pub(crate) fn next_random_u8(&self) -> u8 {
-        let mut bytes = [0;1];
+        let mut bytes = [0; 1];
         self.rng.borrow_mut().fill_bytes(&mut bytes);
         bytes[0]
     }
 
-    pub(crate) fn link_id(&self) -> Result<u32, ()> {
-        self.provisioning_bearer_control.borrow().link_id.ok_or(())
+    pub(crate) fn link_id(&self) -> Option<u32> {
+        self.provisioning_bearer_control.borrow().link_id
     }
 
     pub(crate) async fn tx(&self, data: &[u8]) -> Result<(), ()> {
-        self.tx.request(TxMessage::Transmit(data)).map_err(|_|())?.await;
+        // not actually infallible but...
+        self.tx
+            .request(TxMessage::Transmit(data))
+            .map_err(|_| ())?
+            .await;
         Ok(())
     }
 
-    pub(crate) async fn tx_pdu(&self, pdu: PDU) -> Result<(), ()> {
-        defmt::info!("<< outbound << {}", pdu);
+    pub(crate) async fn tx_pdu(&self, pdu: PDU) -> Result<(), DeviceError> {
         let mut xmit: Vec<u8, 128> = Vec::new();
         pdu.emit(&mut xmit)?;
-        self.tx(&*xmit).await
+        self.tx(&*xmit).await;
+        Ok(())
     }
 
-    pub(crate) async fn tx_link_ack(&self, link_id: u32) -> Result<(), ()> {
+    pub(crate) async fn tx_link_ack(&self, link_id: u32) -> Result<(), DeviceError> {
+        defmt::trace!("<< LinkAck({})", link_id);
         self.tx_pdu(PDU {
             link_id: link_id,
             transaction_number: self.next_transaction(),
@@ -118,36 +156,45 @@ where
                 ProvisioningBearerControl::LinkAck,
             ),
         })
-        .await
+            .await
     }
 
-    pub(crate) async fn tx_transaction_ack(&self, transaction_number: u8) -> Result<(), ()> {
-        self.tx_pdu(PDU {
-            link_id: self.link_id()?,
-            transaction_number,
-            pdu: GenericProvisioningPDU::TransactionAck,
-        })
-        .await
+    pub(crate) async fn tx_transaction_ack(
+        &self,
+        transaction_number: u8,
+    ) -> Result<(), DeviceError> {
+        if let Some(link_id) = self.link_id() {
+            defmt::trace!("<< TransactionAck({})", transaction_number);
+            self.tx_pdu(PDU {
+                link_id,
+                transaction_number,
+                pdu: GenericProvisioningPDU::TransactionAck,
+            })
+                .await
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) fn tx_provisioning_pdu(&self, pdu: ProvisioningPDU) {
-        defmt::info!("NEXT OUTBOUND {}", pdu);
         self.outbound.borrow_mut().replace(pdu);
     }
 
-    pub(crate) fn tx_capabilities(&self) -> Result<(), ()> {
+    pub(crate) fn tx_capabilities(&self) {
+        defmt::trace!("<< Capabilities");
         let pdu = ProvisioningPDU::Capabilities(self.capabilities.clone());
         self.outbound.borrow_mut().replace(pdu);
-        Ok(())
     }
 
-    pub(crate) async fn handle_provisioning_pdu(&self, pdu: ProvisioningPDU) -> Result<(), ()> {
-        defmt::info!("handle_provisioning_pdu: {}", pdu);
+    pub(crate) async fn handle_provisioning_pdu(
+        &self,
+        pdu: ProvisioningPDU,
+    ) -> Result<(), DeviceError> {
         self.provisioning.borrow_mut().handle(self, pdu).await?;
         Ok(())
     }
 
-    pub(crate) async fn handle_transmit(&self) -> Result<(), ()> {
+    pub(crate) async fn handle_transmit(&self) -> Result<(), DeviceError> {
         let mut outbound = self.outbound.borrow_mut();
         self.transaction
             .borrow_mut()
@@ -155,12 +202,72 @@ where
             .await?;
         Ok(())
     }
+
+    async fn handle_pdu(&mut self, pdu: PDU) -> Result<(), DeviceError> {
+        if let GenericProvisioningPDU::ProvisioningBearerControl(_) = pdu.pdu {
+            // we'll delegate link_id checking to the PBC handler.
+        } else {
+            match self.provisioning_bearer_control.borrow().link_id {
+                None => {
+                    return Err(DeviceError::NoEstablishedLink);
+                }
+                Some(current_link_id) => {
+                    if current_link_id != pdu.link_id {
+                        return Err(DeviceError::InvalidLink);
+                    }
+                }
+            }
+        }
+
+        match pdu.pdu {
+            GenericProvisioningPDU::TransactionStart(tx_start) => {
+                self.transaction
+                    .borrow_mut()
+                    .handle_transaction_start(
+                        self,
+                        pdu.transaction_number,
+                        &tx_start,
+                    )
+                    .await
+            }
+            GenericProvisioningPDU::TransactionContinuation(tx_cont, ) => {
+                self.transaction
+                    .borrow_mut()
+                    .handle_transaction_continuation(
+                        self,
+                        pdu.transaction_number,
+                        &tx_cont,
+                    )
+                    .await
+            }
+            GenericProvisioningPDU::TransactionAck => {
+                self.transaction
+                    .borrow_mut()
+                    .handle_transaction_ack(
+                        self,
+                        pdu.transaction_number,
+                    )
+                    .await
+            }
+            GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
+                self.state = State::Provisioning;
+                self.provisioning_bearer_control
+                    .borrow_mut()
+                    .handle(self, pdu.link_id, &pbc)
+                    .await
+            }
+        }
+    }
+
+    pub(crate) fn link_close(&self) {
+        self.transaction.borrow_mut().link_close();
+    }
 }
 
 impl<T, R> Handler for Address<Device<T, R>>
-where
-    T: Transport + 'static,
-    R: RngCore + 'static,
+    where
+        T: Transport + 'static,
+        R: RngCore + 'static,
 {
     fn handle<'m>(&self, message: Vec<u8, 384>) {
         self.notify(message).ok();
@@ -168,23 +275,23 @@ where
 }
 
 impl<T, R> Actor for Device<T, R>
-where
-    T: Transport + 'static,
-    R: RngCore + 'static,
+    where
+        T: Transport + 'static,
+        R: RngCore + 'static,
 {
     type Message<'m> = Vec<u8, 384>;
     type OnMountFuture<'m, M>
-    where
-        M: 'm,
-    = impl Future<Output = ()> + 'm;
+        where
+            M: 'm,
+    = impl Future<Output=()> + 'm;
 
     fn on_mount<'m, M>(
         &'m mut self,
         _: Address<Self>,
         inbox: &'m mut M,
     ) -> Self::OnMountFuture<'m, M>
-    where
-        M: Inbox<Self> + 'm,
+        where
+            M: Inbox<Self> + 'm,
     {
         async move {
             loop {
@@ -200,81 +307,10 @@ where
                             let data = message.message();
                             if data.len() >= 2 && data[1] == PB_ADV {
                                 let pdu = advertising::PDU::parse(data);
-                                defmt::info!(">> inbound >> {}", pdu);
-
                                 if let Ok(pdu) = pdu {
-                                    match pdu.pdu {
-                                        GenericProvisioningPDU::TransactionStart(tx_start) => {
-                                            if let Some(current_link_id) =
-                                                self.provisioning_bearer_control.borrow().link_id
-                                            {
-                                                if current_link_id == pdu.link_id {
-                                                    self.transaction
-                                                        .borrow_mut()
-                                                        .handle_transaction_start(
-                                                            self,
-                                                            pdu.transaction_number,
-                                                            &tx_start,
-                                                        )
-                                                        .await
-                                                } else {
-                                                    Ok(())
-                                                }
-                                            } else {
-                                                Ok(())
-                                            }
-                                        }
-                                        GenericProvisioningPDU::TransactionContinuation(
-                                            tx_cont,
-                                        ) => {
-                                            if let Some(current_link_id) =
-                                                self.provisioning_bearer_control.borrow().link_id
-                                            {
-                                                if current_link_id == pdu.link_id {
-                                                    self.transaction
-                                                        .borrow_mut()
-                                                        .handle_transaction_continuation(
-                                                            self,
-                                                            pdu.transaction_number,
-                                                            &tx_cont,
-                                                        )
-                                                        .await
-                                                } else {
-                                                    Ok(())
-                                                }
-                                            } else {
-                                                Ok(())
-                                            }
-                                        }
-                                        GenericProvisioningPDU::TransactionAck => {
-                                            if let Some(current_link_id) =
-                                                self.provisioning_bearer_control.borrow().link_id
-                                            {
-                                                if current_link_id == pdu.link_id {
-                                                    self.transaction
-                                                        .borrow_mut()
-                                                        .handle_transaction_ack(
-                                                            self,
-                                                            pdu.transaction_number,
-                                                        )
-                                                        .await
-                                                } else {
-                                                    Ok(())
-                                                }
-                                            } else {
-                                                Ok(())
-                                            }
-                                        }
-                                        GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
-                                            self.state = State::Provisioning;
-                                            self.provisioning_bearer_control
-                                                .borrow_mut()
-                                                .handle(self, pdu.link_id, &pbc)
-                                                .await
-                                        }
-                                    }
+                                    self.handle_pdu(pdu).await
                                 } else {
-                                    Ok(())
+                                    Err(DeviceError::InvalidPacket)
                                 }
                             } else {
                                 // Not a PB-ADV

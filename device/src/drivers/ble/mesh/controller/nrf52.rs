@@ -145,7 +145,6 @@ impl Transport for Nrf52BleMeshTransport {
     type TransmitFuture<'m> = impl Future<Output = ()> + 'm;
 
     fn transmit<'m>(&'m self, message: &'m [u8]) -> Self::TransmitFuture<'m> {
-        defmt::info!("****** NRF {} {:x}", message.len(), message);
         let adv =
             peripheral::NonconnectableAdvertisement::NonscannableUndirected { adv_data: message };
 

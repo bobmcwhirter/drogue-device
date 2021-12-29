@@ -2,7 +2,7 @@ pub mod advertising {
     use crate::drivers::ble::mesh::generic_provisioning::{
         GenericProvisioningError, GenericProvisioningPDU,
     };
-    use crate::drivers::ble::mesh::PB_ADV;
+    use crate::drivers::ble::mesh::{InsufficientBuffer, PB_ADV};
     use defmt::Format;
     use heapless::Vec;
 
@@ -41,11 +41,11 @@ pub mod advertising {
             }
         }
 
-        pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),()>{
-            xmit.push(0xFF).map_err(|_|())?; // placeholder for size.
-            xmit.push(PB_ADV).map_err(|_|())?;
-            xmit.extend_from_slice(&self.link_id.to_be_bytes()).map_err(|_|())?;
-            xmit.push(self.transaction_number).map_err(|_|())?;
+        pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),InsufficientBuffer>{
+            xmit.push(0xFF).map_err(|_|InsufficientBuffer)?; // placeholder for size.
+            xmit.push(PB_ADV).map_err(|_|InsufficientBuffer)?;
+            xmit.extend_from_slice(&self.link_id.to_be_bytes()).map_err(|_|InsufficientBuffer)?;
+            xmit.push(self.transaction_number).map_err(|_|InsufficientBuffer)?;
             self.pdu.emit(xmit)?;
             xmit[0] = xmit.len() as u8 - 1;
             Ok(())

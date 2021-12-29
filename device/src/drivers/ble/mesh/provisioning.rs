@@ -1,6 +1,7 @@
 use core::convert::TryInto;
 use defmt::Format;
 use heapless::Vec;
+use crate::drivers::ble::mesh::InsufficientBuffer;
 
 #[derive(Format)]
 pub enum ProvisioningPDU {
@@ -17,24 +18,32 @@ pub enum ProvisioningPDU {
 }
 
 #[derive(Format)]
+pub enum ParseError {
+    InvalidPDUFormat,
+    InvalidValue,
+    InvalidLength,
+    InsufficientBuffer,
+}
+
+#[derive(Format)]
 pub struct Invite {
     pub attention_duration: u8,
 }
 
 impl Invite {
-    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() == 2 && data[0] == ProvisioningPDU::INVITE {
             Ok(Self {
                 attention_duration: data[1],
             })
         } else {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::INVITE ).map_err(|_|())?;
-        xmit.push( self.attention_duration ).map_err(|_|())?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.push( ProvisioningPDU::INVITE ).map_err(|_|InsufficientBuffer)?;
+        xmit.push( self.attention_duration ).map_err(|_|InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -52,7 +61,7 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() == 12 && data[0] == ProvisioningPDU::CAPABILITIES {
             let number_of_elements = data[1];
             let algorithms = Algorithms::parse(u16::from_be_bytes([data[2], data[3]]))?;
@@ -76,13 +85,13 @@ impl Capabilities {
                 input_oob_action,
             })
         } else {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
-        xmit.push(ProvisioningPDU::CAPABILITIES).map_err(|_|())?;
-        xmit.push(self.number_of_elements).map_err(|_|())?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
+        xmit.push(ProvisioningPDU::CAPABILITIES).map_err(|_|InsufficientBuffer)?;
+        xmit.push(self.number_of_elements).map_err(|_|InsufficientBuffer)?;
         self.algorithms.emit(xmit)?;
         self.public_key_type.emit(xmit)?;
         self.static_oob_type.emit(xmit)?;
@@ -104,7 +113,7 @@ pub struct Start {
 }
 
 impl Start {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() == 6 && data[0] == ProvisioningPDU::START {
             let algorithm = Algorithm::parse(data[1])?;
             let public_key = PublicKeySelected::parse(data[2])?;
@@ -120,16 +129,16 @@ impl Start {
                 authentication_size,
             })
         } else {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         }
     }
 
-    fn parse_authentication_size(method: &AuthenticationMethod, octet: u8) -> Result<OOBSize, ()> {
+    fn parse_authentication_size(method: &AuthenticationMethod, octet: u8) -> Result<OOBSize, ParseError> {
         match method {
             AuthenticationMethod::NoOOBAuthentication
             | AuthenticationMethod::StaticOOBAuthentication => {
                 if octet != 0 {
-                    Err(())
+                    Err(ParseError::InvalidValue)
                 } else {
                     Ok(OOBSize::NotSupported)
                 }
@@ -137,7 +146,7 @@ impl Start {
             AuthenticationMethod::OutputOOBAuthentication
             | AuthenticationMethod::InputOOBAuthentication => {
                 if octet == 0 {
-                    Err(())
+                    Err(ParseError::InvalidPDUFormat)
                 } else {
                     OOBSize::parse(octet)
                 }
@@ -145,8 +154,8 @@ impl Start {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::START).map_err(|_|())?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.push( ProvisioningPDU::START).map_err(|_|InsufficientBuffer)?;
         self.algorithm.emit( xmit )?;
         self.public_key.emit( xmit )?;
         self.authentication_method.emit( xmit )?;
@@ -163,21 +172,21 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 65 && data[0] != ProvisioningPDU::PUBLIC_KEY {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(PublicKey {
-                x: data[1..33].try_into().map_err(|_| ())?,
-                y: data[33..65].try_into().map_err(|_| ())?,
+                x: data[1..33].try_into().map_err(|_| ParseError::InsufficientBuffer)?,
+                y: data[33..65].try_into().map_err(|_| ParseError::InsufficientBuffer)?,
             })
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) -> Result<(), ()>{
-        xmit.push( ProvisioningPDU::PUBLIC_KEY ).map_err(|_|())?;
-        xmit.extend_from_slice( &self.x )?;
-        xmit.extend_from_slice( &self.y )?;
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) -> Result<(), InsufficientBuffer> {
+        xmit.push( ProvisioningPDU::PUBLIC_KEY ).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice( &self.x ).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice( &self.y ).map_err(|_|InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -188,19 +197,19 @@ pub struct Confirmation {
 }
 
 impl Confirmation {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 17 && data[0] != ProvisioningPDU::CONFIRMATION {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(Self {
-                confirmation: data[1..].try_into().map_err(|_| ())?,
+                confirmation: data[1..].try_into().map_err(|_| ParseError::InvalidLength)?,
             })
         }
     }
 
-    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::CONFIRMATION ).map_err(|_|())?;
-        xmit.extend_from_slice(&self.confirmation)?;
+    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.push( ProvisioningPDU::CONFIRMATION ).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice(&self.confirmation).map_err(|_|InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -211,19 +220,19 @@ pub struct Random {
 }
 
 impl Random {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 17 && data[0] != ProvisioningPDU::RANDOM {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(Self {
-                random: data[1..].try_into().map_err(|_| ())?,
+                random: data[1..].try_into().map_err(|_| ParseError::InvalidLength)?,
             })
         }
     }
 
-    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),()> {
-        xmit.push( ProvisioningPDU::RANDOM ).map_err(|_|())?;
-        xmit.extend_from_slice( &self.random)?;
+    fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),InsufficientBuffer> {
+        xmit.push( ProvisioningPDU::RANDOM ).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice( &self.random).map_err(|_|InsufficientBuffer)?;
         Ok(())
     }
 }
@@ -235,13 +244,13 @@ pub struct Data {
 }
 
 impl Data {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 34 && data[0] != ProvisioningPDU::DATA {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(Self {
-                encrypted: data[1..26].try_into().map_err(|_| ())?,
-                mic: data[26..34].try_into().map_err(|_| ())?,
+                encrypted: data[1..26].try_into().map_err(|_| ParseError::InvalidLength)?,
+                mic: data[26..34].try_into().map_err(|_| ParseError::InvalidLength)?,
             })
         }
     }
@@ -253,9 +262,9 @@ pub struct Failed {
 }
 
 impl Failed {
-    fn parse(data: &[u8]) -> Result<Self, ()> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 2 && data[0] != ProvisioningPDU::FAILED {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(Self {
                 error_code: ErrorCode::parse(data[1])?,
@@ -277,7 +286,7 @@ impl ProvisioningPDU {
     const COMPLETE: u8 = 0x08;
     const FAILED: u8 = 0x09;
 
-    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 1 {
             match data[0] {
                 Self::INVITE => Ok(Self::Invite(Invite::parse(data)?)),
@@ -290,14 +299,14 @@ impl ProvisioningPDU {
                 Self::DATA => Ok(Self::Data(Data::parse(data)?)),
                 Self::COMPLETE => Self::parse_complete(data),
                 Self::FAILED => Ok(Self::Failed( Failed::parse(data)?)),
-                _ => Err(()),
+                _ => Err(ParseError::InvalidPDUFormat),
             }
         } else {
-            Err(())
+            Err(ParseError::InvalidLength)
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         match self {
             ProvisioningPDU::Invite(_) => {
                 unimplemented!()
@@ -312,7 +321,7 @@ impl ProvisioningPDU {
                 public_key.emit(xmit)
             }
             ProvisioningPDU::InputComplete => {
-                xmit.push( Self::INPUT_COMPLETE ).map_err(|_|())
+                xmit.push( Self::INPUT_COMPLETE ).map_err(|_|InsufficientBuffer)
             }
             ProvisioningPDU::Confirmation(confirmation) => {
                 confirmation.emit(xmit)
@@ -324,7 +333,7 @@ impl ProvisioningPDU {
                 unimplemented!()
             }
             ProvisioningPDU::Complete => {
-                xmit.push(Self::COMPLETE).map_err(|_|())
+                xmit.push(Self::COMPLETE).map_err(|_|InsufficientBuffer)
             }
             ProvisioningPDU::Failed(_) => {
                 unimplemented!()
@@ -332,17 +341,17 @@ impl ProvisioningPDU {
         }
     }
 
-    fn parse_provisioning_input_complete(data: &[u8]) -> Result<Self, ()> {
+    fn parse_provisioning_input_complete(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() == 1 && data[0] == Self::INPUT_COMPLETE {
             Ok(Self::InputComplete)
         } else {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         }
     }
 
-    fn parse_complete(data: &[u8]) -> Result<Self, ()> {
+    fn parse_complete(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() != 1 && data[0] != Self::COMPLETE {
-            Err(())
+            Err(ParseError::InvalidPDUFormat)
         } else {
             Ok(Self::Complete)
         }
@@ -356,18 +365,18 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         if octet == 0x00 {
             Ok(Self::P256)
         } else {
-            Err(())
+            Err(ParseError::InvalidValue)
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
             Algorithm::P256 => {
-                xmit.push( 0x00 ).map_err(|_|())?
+                xmit.push( 0x00 ).map_err(|_|InsufficientBuffer)?
             }
         }
 
@@ -387,21 +396,21 @@ impl Algorithms {
         self.0.push(algo)
     }
 
-    pub fn parse(bits: u16) -> Result<Self, ()> {
+    pub fn parse(bits: u16) -> Result<Self, ParseError> {
         if bits & 0b1111111111111110 != 0 {
-            return Err(());
+            return Err(ParseError::InvalidValue);
         }
 
         let mut algos = Algorithms::new();
 
         if bits & 0b1 == 1 {
-            algos.push(Algorithm::P256).map_err(|_| ())?;
+            algos.push(Algorithm::P256).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         Ok(algos)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         let bits: Option<u16> = self
             .0
             .iter()
@@ -414,7 +423,7 @@ impl Algorithms {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes())
+        xmit.extend_from_slice(&bits.to_be_bytes()).map_err(|_|InsufficientBuffer)
     }
 }
 
@@ -439,9 +448,9 @@ impl Default for PublicKeyType {
 }
 
 impl PublicKeyType {
-    pub fn parse(bits: u8) -> Result<Self, ()> {
+    pub fn parse(bits: u8) -> Result<Self, ParseError> {
         if bits & 0b11111110 != 0 {
-            Err(())
+            Err(ParseError::InvalidValue)
         } else {
             Ok(Self {
                 available: (bits & 0b1 == 1),
@@ -449,11 +458,11 @@ impl PublicKeyType {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         if self.available {
-            xmit.push(0b1).map_err(|_|())
+            xmit.push(0b1).map_err(|_|InsufficientBuffer)
         } else {
-            xmit.push(0b0).map_err(|_|())
+            xmit.push(0b0).map_err(|_|InsufficientBuffer)
         }
     }
 }
@@ -465,18 +474,18 @@ pub enum PublicKeySelected {
 }
 
 impl PublicKeySelected {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         match octet {
             0x00 => Ok(Self::NoPublicKey),
             0x01 => Ok(Self::OOBPublicKey),
-            _ => Err(()),
+            _ => Err(ParseError::InvalidValue),
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
-            PublicKeySelected::NoPublicKey => xmit.push( 0x00 ).map_err(|_|())?,
-            PublicKeySelected::OOBPublicKey => xmit.push( 0x01 ).map_err(|_|())?,
+            PublicKeySelected::NoPublicKey => xmit.push( 0x00 ).map_err(|_|InsufficientBuffer)?,
+            PublicKeySelected::OOBPublicKey => xmit.push( 0x01 ).map_err(|_|InsufficientBuffer)?,
         }
 
         Ok(())
@@ -489,9 +498,9 @@ pub struct StaticOOBType {
 }
 
 impl StaticOOBType {
-    pub fn parse(bits: u8) -> Result<Self, ()> {
+    pub fn parse(bits: u8) -> Result<Self, ParseError> {
         if bits & 0b11111110 != 0 {
-            Err(())
+            Err(ParseError::InvalidValue)
         } else {
             Ok(Self {
                 available: bits & 0b1 == 1,
@@ -499,11 +508,11 @@ impl StaticOOBType {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         if self.available {
-            xmit.push(0b1).map_err(|_|())
+            xmit.push(0b1).map_err(|_|InsufficientBuffer)
         } else {
-            xmit.push(0b0).map_err(|_|())
+            xmit.push(0b0).map_err(|_|InsufficientBuffer)
         }
     }
 }
@@ -521,23 +530,23 @@ pub enum OOBSize {
 }
 
 impl OOBSize {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         if octet == 0 {
             Ok(Self::NotSupported)
         } else if octet < 8 {
             Ok(Self::MaximumSize(octet))
         } else {
-            Err(())
+            Err(ParseError::InvalidValue)
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         match self {
             OOBSize::NotSupported => {
-                xmit.push(0).map_err(|_|())
+                xmit.push(0).map_err(|_|InsufficientBuffer)
             }
             OOBSize::MaximumSize(size) => {
-                xmit.push(*size).map_err(|_|())
+                xmit.push(*size).map_err(|_|InsufficientBuffer)
             }
         }
     }
@@ -553,19 +562,19 @@ pub enum OutputOOBAction {
 }
 
 impl OutputOOBAction {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         match octet {
             0x00 => Ok(Self::Blink),
             0x01 => Ok(Self::Beep),
             0x02 => Ok(Self::Vibrate),
             0x03 => Ok(Self::OutputNumeric),
             0x04 => Ok(Self::OutputAlphanumeric),
-            _ => Err(()),
+            _ => Err(ParseError::InvalidValue),
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|())
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|InsufficientBuffer)
     }
 }
 
@@ -581,40 +590,40 @@ impl OutputOOBActions {
         self.0.push(action)
     }
 
-    pub fn parse(bits: u16) -> Result<Self, ()> {
+    pub fn parse(bits: u16) -> Result<Self, ParseError> {
         if bits & 0b1111111111100000 != 0 {
-            return Err(());
+            return Err(ParseError::InvalidValue);
         }
 
         let mut actions = OutputOOBActions::new();
         if bits & 0b00000001 == 1 {
-            actions.push(OutputOOBAction::Blink).map_err(|_| ())?;
+            actions.push(OutputOOBAction::Blink).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00000010 == 1 {
-            actions.push(OutputOOBAction::Beep).map_err(|_| ())?;
+            actions.push(OutputOOBAction::Beep).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00000100 == 1 {
-            actions.push(OutputOOBAction::Vibrate).map_err(|_| ())?;
+            actions.push(OutputOOBAction::Vibrate).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00001000 == 1 {
             actions
                 .push(OutputOOBAction::OutputNumeric)
-                .map_err(|_| ())?;
+                .map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00010000 == 1 {
             actions
                 .push(OutputOOBAction::OutputAlphanumeric)
-                .map_err(|_| ())?;
+                .map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         Ok(actions)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         let bits = self
             .0
             .iter()
@@ -623,7 +632,7 @@ impl OutputOOBActions {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes())
+        xmit.extend_from_slice(&bits.to_be_bytes()).map_err(|_|InsufficientBuffer)
     }
 }
 
@@ -642,18 +651,18 @@ pub enum InputOOBAction {
 }
 
 impl InputOOBAction {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         match octet {
             0x00 => Ok(Self::Push),
             0x01 => Ok(Self::Twist),
             0x02 => Ok(Self::InputNumeric),
             0x03 => Ok(Self::InputAlphanumeric),
-            _ => Err(()),
+            _ => Err(ParseError::InvalidValue),
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|())
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        xmit.extend_from_slice( &(*self as u16).to_be_bytes()).map_err(|_|InsufficientBuffer)
     }
 }
 
@@ -669,34 +678,34 @@ impl InputOOBActions {
         self.0.push(action)
     }
 
-    pub fn parse(bits: u16) -> Result<Self, ()> {
+    pub fn parse(bits: u16) -> Result<Self, ParseError> {
         if bits & 0b1111111111110000 != 0 {
-            return Err(());
+            return Err(ParseError::InvalidValue);
         }
 
         let mut actions = InputOOBActions::new();
         if bits & 0b00000001 == 1 {
-            actions.push(InputOOBAction::Push).map_err(|_| ())?;
+            actions.push(InputOOBAction::Push).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00000010 == 1 {
-            actions.push(InputOOBAction::Twist).map_err(|_| ())?;
+            actions.push(InputOOBAction::Twist).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00000100 == 1 {
-            actions.push(InputOOBAction::InputNumeric).map_err(|_| ())?;
+            actions.push(InputOOBAction::InputNumeric).map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         if bits & 0b00001000 == 1 {
             actions
                 .push(InputOOBAction::InputAlphanumeric)
-                .map_err(|_| ())?;
+                .map_err(|_| ParseError::InsufficientBuffer)?;
         }
 
         Ok(actions)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer>{
         let bits = self
             .0
             .iter()
@@ -705,7 +714,7 @@ impl InputOOBActions {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes())
+        xmit.extend_from_slice(&bits.to_be_bytes()).map_err(|_| InsufficientBuffer)
     }
 }
 
@@ -723,12 +732,12 @@ pub enum OOBAction {
 }
 
 impl OOBAction {
-    pub fn parse(method: &AuthenticationMethod, octet: u8) -> Result<Self, ()> {
+    pub fn parse(method: &AuthenticationMethod, octet: u8) -> Result<Self, ParseError> {
         match method {
             AuthenticationMethod::NoOOBAuthentication
             | AuthenticationMethod::StaticOOBAuthentication => {
                 if octet != 0 {
-                    Err(())
+                    Err(ParseError::InvalidValue)
                 } else {
                     Ok(Self::None)
                 }
@@ -742,9 +751,9 @@ impl OOBAction {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
-            OOBAction::None => xmit.push(0x00).map_err(|_|())?,
+            OOBAction::None => xmit.push(0x00).map_err(|_|InsufficientBuffer)?,
             OOBAction::Output(action) => {
                 action.emit(xmit)?;
             }
@@ -767,22 +776,22 @@ pub enum AuthenticationMethod {
 }
 
 impl AuthenticationMethod {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         match octet {
             0x00 => Ok(Self::NoOOBAuthentication),
             0x01 => Ok(Self::StaticOOBAuthentication),
             0x02 => Ok(Self::OutputOOBAuthentication),
             0x03 => Ok(Self::InputOOBAuthentication),
-            _ => Err(()),
+            _ => Err(ParseError::InvalidValue),
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
         match self {
-            AuthenticationMethod::NoOOBAuthentication => xmit.push(0x00).map_err(|_|())?,
-            AuthenticationMethod::StaticOOBAuthentication => xmit.push(0x01).map_err(|_|())?,
-            AuthenticationMethod::OutputOOBAuthentication => xmit.push(0x02).map_err(|_|())?,
-            AuthenticationMethod::InputOOBAuthentication => xmit.push(0x03).map_err(|_|())?,
+            AuthenticationMethod::NoOOBAuthentication => xmit.push(0x00).map_err(|_|InsufficientBuffer)?,
+            AuthenticationMethod::StaticOOBAuthentication => xmit.push(0x01).map_err(|_|InsufficientBuffer)?,
+            AuthenticationMethod::OutputOOBAuthentication => xmit.push(0x02).map_err(|_|InsufficientBuffer)?,
+            AuthenticationMethod::InputOOBAuthentication => xmit.push(0x03).map_err(|_|InsufficientBuffer)?,
         }
         Ok(())
     }
@@ -802,7 +811,7 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
-    pub fn parse(octet: u8) -> Result<Self, ()> {
+    pub fn parse(octet: u8) -> Result<Self, ParseError> {
         match octet {
             0x00 => Ok(Self::Prohibited),
             0x01 => Ok(Self::InvalidPDU),
@@ -813,7 +822,7 @@ impl ErrorCode {
             0x06 => Ok(Self::DecryptionFailed),
             0x07 => Ok(Self::UnexpectedError),
             0x08 => Ok(Self::CannotAssignAddresses),
-            _ => Err(()),
+            _ => Err(ParseError::InvalidValue),
         }
     }
 }

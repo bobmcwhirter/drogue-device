@@ -1,11 +1,14 @@
-use crate::actors::ble::mesh::device::Device;
+use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::generic_provisioning::{
     GenericProvisioningPDU, TransactionContinuation, TransactionStart,
 };
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 use crate::drivers::ble::mesh::transport::Transport;
+use crate::drivers::ble::mesh::InsufficientBuffer;
+use core::cell::RefCell;
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::Format;
 use heapless::Vec;
 use rand_core::RngCore;
@@ -15,8 +18,8 @@ where
     T: Transport + 'static,
     R: RngCore,
 {
-    inbound_segments: Option<InboundSegments>,
-    inbound_acks: Option<u8>,
+    inbound_segments: RefCell<Option<InboundSegments>>,
+    inbound_acks: RefCell<Option<u8>>,
     outbound_segments: Option<OutboundSegments>,
     _marker: PhantomData<(T, R)>,
 }
@@ -28,15 +31,21 @@ where
 {
     pub(crate) fn new() -> Self {
         Self {
-            inbound_segments: None,
-            inbound_acks: None,
+            inbound_segments: RefCell::new(None),
+            inbound_acks: RefCell::new(None),
             outbound_segments: None,
             _marker: PhantomData,
         }
     }
 
+    pub(crate) fn link_close(&mut self) {
+        self.inbound_segments.borrow_mut().take();
+        self.inbound_acks.borrow_mut().take();
+        self.outbound_segments.take();
+    }
+
     fn already_acked(&self, transaction_number: u8) -> bool {
-        if let Some(ack) = self.inbound_acks {
+        if let Some(ack) = *self.inbound_acks.borrow() {
             return transaction_number <= ack;
         } else {
             false
@@ -47,7 +56,7 @@ where
         &mut self,
         device: &Device<T, R>,
         transaction_number: u8,
-    ) -> Result<bool, ()> {
+    ) -> Result<bool, DeviceError> {
         if !self.already_acked(transaction_number) {
             Ok(false)
         } else {
@@ -56,16 +65,21 @@ where
         }
     }
 
-    async fn do_ack(&mut self, device: &Device<T, R>, transaction_number: u8) -> Result<(), ()> {
+    async fn do_ack(
+        &self,
+        device: &Device<T, R>,
+        transaction_number: u8,
+    ) -> Result<(), DeviceError> {
         device.tx_transaction_ack(transaction_number).await?;
-        match self.inbound_acks {
+        let mut acks = self.inbound_acks.borrow_mut();
+        match *acks {
             None => {
-                self.inbound_acks.replace(transaction_number);
+                acks.replace(transaction_number);
             }
             Some(latest) => {
                 // TODO fix wraparound rollover.
                 if transaction_number > latest {
-                    self.inbound_acks.replace(transaction_number);
+                    acks.replace(transaction_number);
                 }
             }
         }
@@ -77,23 +91,29 @@ where
         device: &Device<T, R>,
         transaction_number: u8,
         transaction_start: &TransactionStart,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         if self.check_ack(device, transaction_number).await? {
-            defmt::info!("ALREADY ACKd {}", transaction_number);
             return Ok(());
         }
 
         if transaction_start.seg_n == 0 {
             let pdu = ProvisioningPDU::parse(&*transaction_start.data)?;
-            //device.tx_transaction_ack(transaction_number).await?;
             self.do_ack(device, transaction_number).await?;
             device.handle_provisioning_pdu(pdu).await?;
         } else {
-            self.inbound_segments = Some(InboundSegments::new(
-                transaction_number,
-                transaction_start.seg_n,
-                &transaction_start.data,
-            )?);
+            let needs_new = match &*self.inbound_segments.borrow() {
+                Some(inbound) if inbound.transaction_number == transaction_number => false,
+                _ => true,
+            };
+            if needs_new {
+                self.inbound_segments
+                    .borrow_mut()
+                    .replace(InboundSegments::new(
+                        transaction_number,
+                        transaction_start.seg_n,
+                        &transaction_start.data,
+                    )?);
+            }
         }
 
         Ok(())
@@ -104,32 +124,48 @@ where
         device: &Device<T, R>,
         transaction_number: u8,
         transaction_continuation: &TransactionContinuation,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         if self.check_ack(device, transaction_number).await? {
             return Ok(());
         }
 
-        if self.inbound_segments.as_mut().ok_or(())?.receive(
-            transaction_number,
-            transaction_continuation.segment_index,
-            &transaction_continuation.data,
-        )? {
-            self.do_ack(device, transaction_number).await?;
+        let mut complete = false;
 
-            let mut data: Vec<u8, 1024> = Vec::new();
-            self.inbound_segments.as_ref().ok_or(())?.fill(&mut data).map_err(|_|())?;
-            let pdu = ProvisioningPDU::parse(&*data)?;
-            device.handle_provisioning_pdu(pdu).await?;
+        let result = if let Some(inbound) = self.inbound_segments.borrow_mut().as_mut() {
+            if inbound.receive(
+                transaction_number,
+                transaction_continuation.segment_index,
+                &transaction_continuation.data,
+            )? {
+                complete = true;
+                self.do_ack(device, transaction_number).await?;
+
+                let mut data: Vec<u8, 1024> = Vec::new();
+                inbound.fill(&mut data)?;
+                let pdu = ProvisioningPDU::parse(&*data)?;
+                device.handle_provisioning_pdu(pdu).await
+            } else {
+                // inbound segments are not yet complete, let it come around again.
+                Ok(())
+            }
+        } else {
+            // Maybe we just missed the first TransactionStart, so not an error,
+            // hope a retransmit finds its way to us.
+            Ok(())
+        };
+
+        if complete {
+            self.inbound_segments.borrow_mut().take();
         }
 
-        Ok(())
+        result
     }
 
     pub(crate) async fn handle_outbound(
         &mut self,
         device: &Device<T, R>,
         pdu: Option<ProvisioningPDU>,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         match pdu {
             None => {
                 // nothing
@@ -155,12 +191,12 @@ where
         &mut self,
         device: &Device<T, R>,
         transaction_number: u8,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         match &self.outbound_segments {
             None => { /* nothing */ }
             Some(segments) => {
-                defmt::info!(">> TransactionAck {}", segments.transaction_number);
                 if segments.transaction_number == transaction_number {
+                    defmt::trace!(">> TransactionAck({})", segments.transaction_number);
                     self.outbound_segments.take();
                 }
             }
@@ -170,22 +206,30 @@ where
     }
 }
 
+struct IncompleteTransaction;
+
 struct InboundSegments {
     transaction_number: u8,
     segments: Vec<Option<Vec<u8, 64>>, 32>,
 }
 
 impl InboundSegments {
-    fn new(transaction_number: u8, seg_n: u8, data: &Vec<u8, 64>) -> Result<Self, ()> {
+    fn new(
+        transaction_number: u8,
+        seg_n: u8,
+        data: &Vec<u8, 64>,
+    ) -> Result<Self, InsufficientBuffer> {
         let mut this = Self {
             transaction_number,
             segments: Vec::new(),
         };
         for _ in 0..seg_n + 1 {
-            this.segments.push(None).map_err(|_|())?;
+            this.segments.push(None).map_err(|_| InsufficientBuffer)?;
         }
         let mut chunk = Vec::new();
-        chunk.extend_from_slice(data).map_err(|_|())?;
+        chunk
+            .extend_from_slice(data)
+            .map_err(|_| InsufficientBuffer)?;
         this.segments[0] = Some(chunk);
         Ok(this)
     }
@@ -199,37 +243,38 @@ impl InboundSegments {
         transaction_number: u8,
         segment_index: u8,
         data: &Vec<u8, 64>,
-    ) -> Result<bool, ()> {
+    ) -> Result<bool, DeviceError> {
         if transaction_number != self.transaction_number {
-            return Err(());
+            return Err(DeviceError::InvalidTransactionNumber);
         }
 
         if let None = self.segments[segment_index as usize] {
             let mut chunk = Vec::new();
-            chunk.extend_from_slice(data).map_err(|_|())?;
+            chunk
+                .extend_from_slice(data)
+                .map_err(|_| DeviceError::InsufficientBuffer)?;
             self.segments[segment_index as usize] = Some(chunk);
         }
 
         Ok(self.is_complete())
     }
 
-    pub(crate) fn fill<const N: usize>(&self, dst: &mut Vec<u8, N>) -> Result<(), ()> {
+    pub(crate) fn fill<const N: usize>(&self, dst: &mut Vec<u8, N>) -> Result<(), DeviceError> {
         for chunk in &self.segments {
-            dst.extend_from_slice(&chunk.as_ref().ok_or(())?)?
+            dst.extend_from_slice(&chunk.as_ref().ok_or(DeviceError::IncompleteTransaction)?)
+                .map_err(|_| DeviceError::InsufficientBuffer)?
         }
 
         Ok(())
     }
 }
 
-#[derive(Format)]
 struct OutboundSegments {
     transaction_number: u8,
-    pdu: Vec<u8, 256>,
+    pdu: Vec<u8, 128>,
     num_segments: u8,
     fcs: u8,
-    // TODO remove this field.
-    orig: ProvisioningPDU,
+    first: AtomicBool,
 }
 
 const TRANSACTION_START_MTU: usize = 20;
@@ -242,44 +287,46 @@ impl OutboundSegments {
         let fcs = fcs(&data);
         let num_segments = Self::num_chunks(&data);
 
-        defmt::info!("################ {}", num_segments);
         Self {
             transaction_number,
             pdu: data,
             num_segments,
             fcs: fcs,
-            orig: pdu,
+            first: AtomicBool::new(true),
         }
     }
 
-    pub async fn transmit<T, R>(&self, device: &Device<T, R>) -> Result<(), ()>
+    pub async fn transmit<T, R>(&self, device: &Device<T, R>) -> Result<(), DeviceError>
     where
         T: Transport + 'static,
         R: RngCore + 'static,
     {
-        defmt::info!("<< outbound << {}", self.orig);
+        if self.first.swap(false, Ordering::SeqCst) {
+            defmt::trace!("<< Transaction({})", self.transaction_number);
+        }
 
         let iter = OutboundSegmentsIter::new(self);
 
-        for pdu in iter {
-            device
-                .tx_pdu(PDU {
-                    link_id: device.link_id()?,
-                    transaction_number: self.transaction_number,
-                    pdu,
-                })
-                .await?
+        if let Some(link_id) = device.link_id() {
+            for pdu in iter {
+                device
+                    .tx_pdu(PDU {
+                        link_id,
+                        transaction_number: self.transaction_number,
+                        pdu,
+                    })
+                    .await?
+            }
+            Ok(())
+        } else {
+            Err(DeviceError::NoEstablishedLink)
         }
-
-        Ok(())
     }
 
     fn num_chunks(pdu: &[u8]) -> u8 {
-        defmt::info!("counting chunks for {}", pdu.len());
         let mut len = pdu.len();
         // TransactionStart can hold 20
         if len <= TRANSACTION_START_MTU {
-            defmt::info!("simple 1");
             return 1;
         }
         let mut num_chunks = 1;
@@ -323,8 +370,6 @@ impl<'a> Iterator for OutboundSegmentsIter<'a> {
                 &self.segments.pdu[0..TRANSACTION_START_MTU]
             };
 
-            defmt::info!("chunk 0: len={}", chunk.len());
-
             Some(GenericProvisioningPDU::TransactionStart(TransactionStart {
                 seg_n: self.segments.num_segments as u8 - 1,
                 total_len: self.segments.pdu.len() as u16,
@@ -332,11 +377,8 @@ impl<'a> Iterator for OutboundSegmentsIter<'a> {
                 data: Vec::from_slice(chunk).ok()?,
             }))
         } else {
-            defmt::info!("cur = {}", cur);
             let chunk_start = TRANSACTION_START_MTU + ((cur - 1) * TRANSACTION_CONTINUATION_MTU);
-            defmt::info!("chunk {}: start={}", cur, chunk_start);
             if chunk_start >= self.segments.pdu.len() {
-                defmt::info!("chunk {}: None", cur);
                 None
             } else {
                 let chunk_end = chunk_start + TRANSACTION_CONTINUATION_MTU;

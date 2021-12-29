@@ -1,4 +1,4 @@
-use crate::actors::ble::mesh::device::Device;
+use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
 use crate::drivers::ble::mesh::crypto::{aes_ccm_decrypt, aes_cmac, s1};
 use crate::drivers::ble::mesh::provisioning::{
@@ -8,10 +8,12 @@ use crate::drivers::ble::mesh::provisioning::{
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
+use cmac::crypto_mac::InvalidKeyLength;
 use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
 use rand_core::RngCore;
+use crate::drivers::ble::mesh::InsufficientBuffer;
 
 enum State {
     None,
@@ -96,63 +98,77 @@ where
         &mut self,
         device: &Device<T, R>,
         mut pdu: ProvisioningPDU,
-    ) -> Result<(), ()> {
+    ) -> Result<(), DeviceError> {
         match pdu {
             ProvisioningPDU::Invite(invite) => {
-                defmt::info!(">> ProvisioningPDU::Invite");
+                defmt::trace!(">> Invite");
                 self.state = State::Invite;
                 self.transcript.add_invite(&invite)?;
-                device.tx_capabilities()?;
+                device.tx_capabilities();
                 self.transcript.add_capabilities(&device.capabilities)?;
             }
-            ProvisioningPDU::Capabilities(_) => {}
+            ProvisioningPDU::Capabilities(_) => {
+                unimplemented!()
+            }
             ProvisioningPDU::Start(start) => {
-                defmt::info!(">> ProvisioningPDU::Start");
+                defmt::trace!(">> Start");
                 self.transcript.add_start(&start)?;
                 let auth_value = self.determine_auth_value(device, &start)?;
                 // TODO actually let the device/app/thingy know what it is so that it can blink/flash/accept input
                 self.auth_value.replace(auth_value);
             }
             ProvisioningPDU::PublicKey(public_key) => {
-                defmt::info!(">> ProvisioningPDU::PublicKey");
+                defmt::trace!(">> PublicKey");
                 self.transcript.add_pubkey_provisioner(&public_key)?;
+                let peer_pk_x = public_key.x;
+                let peer_pk_y = public_key.y;
+                defmt::trace!(">>   x = {:x}", &peer_pk_x[0..]);
+                defmt::trace!(">>   y = {:x}", &peer_pk_y[0..]);
+
                 // TODO remove unwrap
                 let peer_pk =
                     p256::PublicKey::from_encoded_point(&EncodedPoint::from_affine_coordinates(
-                        &public_key.x.into(),
-                        &public_key.y.into(),
+                        &peer_pk_x.into(),
+                        &peer_pk_y.into(),
                         false,
                     ))
                     .unwrap();
+
                 device.key_manager.set_peer_public_key(peer_pk);
                 let pk = device.public_key();
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
                 let y = xy.y().unwrap();
                 let pk = PublicKey {
-                    x: <[u8; 32]>::try_from(x.as_slice()).map_err(|_| ())?,
-                    y: <[u8; 32]>::try_from(y.as_slice()).map_err(|_| ())?,
+                    x: <[u8; 32]>::try_from(x.as_slice()).map_err(|_| InsufficientBuffer)?,
+                    y: <[u8; 32]>::try_from(y.as_slice()).map_err(|_| InsufficientBuffer)?,
                 };
                 self.transcript.add_pubkey_device(&pk)?;
+                defmt::trace!("<< PublicKey");
+                defmt::trace!("<<   x = {:x}", &pk.x);
+                defmt::trace!("<<   y = {:x}", &pk.y);
                 device.tx_provisioning_pdu(ProvisioningPDU::PublicKey(pk));
             }
             ProvisioningPDU::InputComplete => {
-                defmt::info!(">> ProvisioningPDU::InputComplete");
+                defmt::trace!(">> InputComplete");
             }
             ProvisioningPDU::Confirmation(confirmation) => {
-                defmt::info!(">> ProvisioningPDU::Confirmation {}", confirmation);
+                defmt::trace!(">> Confirmation");
+                defmt::trace!(">>   {}", confirmation);
                 let confirmation_device = self.confirmation_device(device)?;
                 device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(confirmation_device));
             }
             ProvisioningPDU::Random(random) => {
-                defmt::info!(">> ProvisioningPDU::Random");
+                defmt::trace!(">> Random");
+                defmt::trace!(">>   {}", random);
                 device.tx_provisioning_pdu(ProvisioningPDU::Random(Random {
                     random: device.key_manager.random,
                 }));
                 self.random_provisioner.replace( random.random );
             }
             ProvisioningPDU::Data(ref mut data) => {
-                defmt::info!(">> ProvisioningPDU::Data");
+                defmt::trace!(">> Data");
+                defmt::trace!(">>   {}", data);
 
                 let mut provisioning_salt = [0; 48];
                 provisioning_salt[0..16].copy_from_slice( &self.transcript.confirmation_salt()?.into_bytes());
@@ -160,17 +176,12 @@ where
                 provisioning_salt[32..48].copy_from_slice( &device.key_manager.random );
                 let provisioning_salt = &s1( &provisioning_salt )?.into_bytes()[0..];
 
-                defmt::info!("prov-salt {:x}", provisioning_salt);
-
                 let session_key = &device.key_manager.k1( &provisioning_salt, b"prsk")?.into_bytes()[0..];
                 let session_nonce = &device.key_manager.k1( &provisioning_salt, b"prsn")?.into_bytes()[3..];
 
-                defmt::info!("session key {:x}", session_key);
-                defmt::info!("session nonce {:x}", session_nonce);
-                defmt::info!("encrypted {:x}", data.encrypted);
+                defmt::trace!("** session_key {:x}", session_key);
+                defmt::trace!("** session_nonce {:x}", session_nonce);
 
-                //let mut buffer = CryptoBuffer::<128>::from_slice(&data.encrypted)?;
-                //let result = aes_ccm_decrypt(&session_key, &session_nonce, &mut buffer, &data.mic);
                 let result = aes_ccm_decrypt(&session_key, &session_nonce, &mut data.encrypted, &data.mic);
                 match result {
                     Ok(_) => {
@@ -183,41 +194,32 @@ where
                 device.tx_provisioning_pdu(ProvisioningPDU::Complete);
             }
             ProvisioningPDU::Complete => {
-                defmt::info!(">> ProvisioningPDU::Complete");
+                defmt::trace!(">> Complete");
             }
             ProvisioningPDU::Failed(_failed) => {
-                defmt::info!(">> ProvisioningPDU::Failed");
+                defmt::trace!(">> Failed");
             }
         }
         Ok(())
     }
 
-    fn confirmation_device(&self, device: &Device<T, R>) -> Result<Confirmation, ()> {
-        defmt::info!("confirmation_device A");
+    fn confirmation_device(&self, device: &Device<T, R>) -> Result<Confirmation, DeviceError> {
         let salt = self.transcript.confirmation_salt()?;
-        defmt::info!("confirmation_device B");
         let confirmation_key = device.key_manager.k1(&*salt.into_bytes(), b"prck")?;
-        defmt::info!("confirmation_device C");
         let mut bytes: Vec<u8, 32> = Vec::new();
-        defmt::info!("confirmation_device D");
-        bytes.extend_from_slice(&device.key_manager.random)?;
-        defmt::info!("confirmation_device E");
-        bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(())?.get_bytes())?;
-        defmt::info!("confirmation_device F");
+        bytes.extend_from_slice(&device.key_manager.random).map_err(|_|DeviceError::InsufficientBuffer)?;
+        bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(DeviceError::InsufficientBuffer)?.get_bytes()).map_err(|_|DeviceError::InsufficientBuffer)?;
         let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
-        defmt::info!("confirmation_device G");
 
         let mut confirmation = [0; 16];
-        defmt::info!("confirmation_device H");
         for (i, byte) in confirmation_device.into_bytes().iter().enumerate() {
             confirmation[i] = *byte;
         }
-        defmt::info!("confirmation_device I");
 
         Ok(Confirmation { confirmation })
     }
 
-    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> Result<AuthValue,()> {
+    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> Result<AuthValue,DeviceError> {
         Ok(match (&start.authentication_action, &start.authentication_size) {
             (
                 OOBAction::Output(OutputOOBAction::Blink)
@@ -332,17 +334,17 @@ where
         }
     }
 
-    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Result<Vec<u8, 8>, ()> {
+    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Result<Vec<u8, 8>, DeviceError> {
         let mut random = Vec::new();
         for _ in 0..size {
             loop {
                 let candidate = device.next_random_u8();
                 if candidate >= 64 && candidate <= 90 {
                     // Capital ASCII letters A-Z
-                    random.push(candidate).map_err(|_|())?;
+                    random.push(candidate).map_err(|_|DeviceError::InsufficientBuffer)?;
                 } else if candidate >= 48 && candidate <= 57 {
                     // ASCII numbers 0-9
-                    random.push(candidate).map_err(|_|())?;
+                    random.push(candidate).map_err(|_|DeviceError::InsufficientBuffer)?;
                 }
             }
         }
