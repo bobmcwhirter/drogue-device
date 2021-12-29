@@ -21,7 +21,12 @@ impl KeyManager {
     {
         let mut wrapper = RngWrapper(rng);
         let mut random = [0; 16];
-        wrapper.fill_bytes(&mut random);
+        loop {
+            if let Ok(()) = wrapper.try_fill_bytes(&mut random) {
+                break;
+            }
+        }
+
         defmt::info!("**************************** {}", random);
         let secret = SecretKey::random(&mut wrapper);
         Self {
@@ -36,7 +41,7 @@ impl KeyManager {
         self.private_key.public_key()
     }
 
-    pub fn add_peer_public_key(&self, pk: PublicKey) {
+    pub fn set_peer_public_key(&self, pk: PublicKey) {
         self.shared_secret.borrow_mut().replace(diffie_hellman(
             &self.private_key.to_nonzero_scalar(),
             pk.as_affine(),

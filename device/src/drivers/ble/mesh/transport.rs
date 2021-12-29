@@ -1,6 +1,5 @@
 use crate::drivers::ble::mesh::device::Uuid;
 use core::future::Future;
-use embassy::executor::Spawner;
 use heapless::Vec;
 
 pub trait Handler: Sized {

@@ -1,12 +1,10 @@
-use crate::actors::ble::mesh::device::Device;
-use crate::drivers::ble::mesh::bearer::advertising::PDU;
-use crate::drivers::ble::mesh::generic_provisioning::{
-    GenericProvisioningPDU, ProvisioningBearerControl,
-};
-use crate::drivers::ble::mesh::transport::Transport;
 use core::marker::PhantomData;
-use heapless::Vec;
+
 use rand_core::RngCore;
+
+use crate::actors::ble::mesh::device::Device;
+use crate::drivers::ble::mesh::generic_provisioning::ProvisioningBearerControl;
+use crate::drivers::ble::mesh::transport::Transport;
 
 enum State {
     None,
@@ -14,9 +12,9 @@ enum State {
 }
 
 pub struct ProvisioningBearerControlHander<T, R>
-where
-    T: Transport + 'static,
-    R: RngCore,
+    where
+        T: Transport + 'static,
+        R: RngCore,
 {
     state: State,
     pub(crate) link_id: Option<u32>,
@@ -24,10 +22,10 @@ where
     _marker: PhantomData<(T, R)>,
 }
 
-impl<T,R> ProvisioningBearerControlHander<T, R>
-where
-    T: Transport + 'static,
-    R: RngCore,
+impl<T, R> ProvisioningBearerControlHander<T, R>
+    where
+        T: Transport + 'static,
+        R: RngCore,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -43,26 +41,31 @@ where
         device: &Device<T, R>,
         link_id: u32,
         pbc: &ProvisioningBearerControl,
-    ) {
+    ) -> Result<(), ()> {
         match pbc {
             ProvisioningBearerControl::LinkOpen(uuid) => {
                 if *uuid != device.uuid {
                     // discard
+                    return Ok(());
                 }
 
-                if matches!(self.link_id, None) || matches!(self.link_id, Some(link_id)) {
+                if matches!(self.link_id, None) || matches!(self.link_id, Some(self_link_id) if link_id == self_link_id) {
                     defmt::info!(">> LinkOpen");
                     self.link_id.replace(link_id);
-                    device.tx_link_ack(link_id).await;
+                    device.tx_link_ack(link_id).await
+                } else {
+                    Ok(())
                 }
             }
             ProvisioningBearerControl::LinkAck => {
+                Ok(())
                 // ignorable for this role
             }
-            ProvisioningBearerControl::LinkClose(reason) => {
+            ProvisioningBearerControl::LinkClose(_reason) => {
                 defmt::info!(">> LinkClose");
                 self.link_id.take();
                 self.state = State::None;
+                Ok(())
             }
         }
     }

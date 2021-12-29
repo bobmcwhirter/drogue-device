@@ -1,6 +1,4 @@
 use crate::drivers::ble::mesh::device::Uuid;
-use core::convert::TryFrom;
-use core::convert::TryInto;
 use defmt::Format;
 use heapless::Vec;
 
@@ -38,18 +36,19 @@ impl TransactionStart {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
-        xmit.push( self.seg_n << 2);
-        xmit.extend_from_slice( &self.total_len.to_be_bytes() );
-        xmit.push(self.fcs);
-        xmit.extend_from_slice(&*self.data);
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.push(self.seg_n << 2).map_err(|_| ())?;
+        xmit.extend_from_slice(&self.total_len.to_be_bytes()).map_err(|_| ())?;
+        xmit.push(self.fcs).map_err(|_| ())?;
+        xmit.extend_from_slice(&*self.data).map_err(|_| ())?;
+        Ok(())
     }
 }
 
 #[derive(Format)]
 pub struct TransactionContinuation {
     pub segment_index: u8,
-    pub data: Vec<u8, 64>
+    pub data: Vec<u8, 64>,
 }
 
 impl TransactionContinuation {
@@ -66,11 +65,11 @@ impl TransactionContinuation {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) {
-        xmit.push( self.segment_index << 2 | 0b10 );
-        xmit.extend_from_slice(&*self.data);
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
+        xmit.push(self.segment_index << 2 | 0b10).map_err(|_| ())?;
+        xmit.extend_from_slice(&*self.data).map_err(|_| ())?;
+        Ok(())
     }
-
 }
 
 #[derive(Format)]
@@ -99,22 +98,24 @@ impl GenericProvisioningPDU {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
         match self {
             GenericProvisioningPDU::TransactionStart(tx_start) => {
-                tx_start.emit(xmit);
+                tx_start.emit(xmit)?;
             }
             GenericProvisioningPDU::TransactionAck => {
                 // Ack is simple.
-                xmit.push(0b00000001);
+                xmit.push(0b00000001).map_err(|_| ())?;
             }
             GenericProvisioningPDU::TransactionContinuation(tx_cont) => {
-                tx_cont.emit(xmit);
+                tx_cont.emit(xmit)?;
             }
             GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
-                pbc.emit(xmit);
+                pbc.emit(xmit)?;
             }
         }
+
+        Ok(())
     }
 
     fn parse_transaction_ack(data: &[u8]) -> Result<Self, GenericProvisioningError> {
@@ -147,14 +148,16 @@ impl ProvisioningBearerControl {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
         match self {
             ProvisioningBearerControl::LinkOpen(_) => {}
             ProvisioningBearerControl::LinkAck => {
-                xmit.push((0x01 << 2 | 0b11));
+                xmit.push(0x01 << 2 | 0b11).map_err(|_| ())?;
             }
             ProvisioningBearerControl::LinkClose(_) => {}
         }
+
+        Ok(())
     }
 
     fn parse_link_open(data: &[u8]) -> Result<Self, GenericProvisioningError> {

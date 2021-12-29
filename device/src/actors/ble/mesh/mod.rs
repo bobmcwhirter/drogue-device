@@ -1,11 +1,9 @@
-use crate::actors::ble::mesh::bearer::{BleMeshBearer, Tx};
-use crate::actors::ble::mesh::device::Device;
+use crate::actors::ble::mesh::bearer::BleMeshBearer;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
-use crate::drivers::ble::mesh::transport::{Handler, Transport};
+use crate::drivers::ble::mesh::transport::Transport;
 use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
 use core::future::Future;
-use heapless::Vec;
 use rand_core::{CryptoRng, RngCore};
 
 pub mod bearer;

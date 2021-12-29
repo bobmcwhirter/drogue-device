@@ -6,7 +6,7 @@
 
 #[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
-
+use drogue_device::{ActorContext, actors, DeviceContext, drivers, Package};
 use drogue_device::actors::ble::mesh::BleMesh;
 use drogue_device::drivers::ble::mesh::controller::nrf52::{Nrf52BleMeshTransport, SoftdeviceRng};
 use drogue_device::drivers::ble::mesh::device::Uuid;
@@ -15,24 +15,16 @@ use drogue_device::drivers::ble::mesh::provisioning::{
     StaticOOBType,
 };
 use drogue_device::drivers::ble::mesh::transport::Transport;
-use drogue_device::{actors, drivers, Actor, ActorContext, Address, Board, DeviceContext, Package};
 use embassy::executor::Spawner;
-use embassy_nrf::config::Config;
-use embassy_nrf::gpio::{Level, OutputDrive, Pin};
-use embassy_nrf::interrupt::Priority;
-use embassy_nrf::peripherals::P0_13;
 use embassy_nrf::{
     gpio::{AnyPin, Output},
     Peripherals,
 };
-use embassy_nrf::rng::Rng;
-use embassy_nrf::interrupt;
-
-use nrf_softdevice::Softdevice;
-
+use embassy_nrf::config::Config;
+//use embassy_nrf::interrupt;
+use embassy_nrf::interrupt::Priority;
+//use nrf_softdevice::Softdevice as _;
 use panic_probe as _;
-
-use heapless::Vec;
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
@@ -54,7 +46,7 @@ const NODE_UUID: Uuid = Uuid([
 ]);
 
 #[embassy::main(config = "config()")]
-async fn main(spawner: Spawner, p: Peripherals) {
+async fn main(spawner: Spawner, _p: Peripherals) {
     let transport = Nrf52BleMeshTransport::new();
     let rng = transport.rng();
 

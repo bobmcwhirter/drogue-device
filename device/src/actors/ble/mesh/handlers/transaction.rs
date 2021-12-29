@@ -7,9 +7,7 @@ use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 use crate::drivers::ble::mesh::transport::Transport;
 use core::marker::PhantomData;
 use defmt::Format;
-use embassy::time::Duration;
 use heapless::Vec;
-use nrf_softdevice_s140::sd_evt_get;
 use rand_core::RngCore;
 
 pub struct TransactionHandler<T, R>
@@ -95,7 +93,7 @@ where
                 transaction_number,
                 transaction_start.seg_n,
                 &transaction_start.data,
-            ));
+            )?);
         }
 
         Ok(())
@@ -119,7 +117,7 @@ where
             self.do_ack(device, transaction_number).await?;
 
             let mut data: Vec<u8, 1024> = Vec::new();
-            self.inbound_segments.as_ref().ok_or(())?.fill(&mut data);
+            self.inbound_segments.as_ref().ok_or(())?.fill(&mut data).map_err(|_|())?;
             let pdu = ProvisioningPDU::parse(&*data)?;
             device.handle_provisioning_pdu(pdu).await?;
         }
@@ -178,18 +176,18 @@ struct InboundSegments {
 }
 
 impl InboundSegments {
-    fn new(transaction_number: u8, seg_n: u8, data: &Vec<u8, 64>) -> Self {
+    fn new(transaction_number: u8, seg_n: u8, data: &Vec<u8, 64>) -> Result<Self, ()> {
         let mut this = Self {
             transaction_number,
             segments: Vec::new(),
         };
-        for n in 0..seg_n + 1 {
-            this.segments.push(None);
+        for _ in 0..seg_n + 1 {
+            this.segments.push(None).map_err(|_|())?;
         }
         let mut chunk = Vec::new();
-        chunk.extend_from_slice(data);
+        chunk.extend_from_slice(data).map_err(|_|())?;
         this.segments[0] = Some(chunk);
-        this
+        Ok(this)
     }
 
     fn is_complete(&self) -> bool {
@@ -208,7 +206,7 @@ impl InboundSegments {
 
         if let None = self.segments[segment_index as usize] {
             let mut chunk = Vec::new();
-            chunk.extend_from_slice(data);
+            chunk.extend_from_slice(data).map_err(|_|())?;
             self.segments[segment_index as usize] = Some(chunk);
         }
 
@@ -264,44 +262,15 @@ impl OutboundSegments {
         let iter = OutboundSegmentsIter::new(self);
 
         for pdu in iter {
-            //defmt::info!("PAUSE");
-            //embassy::time::Timer::after(Duration::from_millis(5000)).await;
-            //defmt::info!("PAUSE done");
             device
                 .tx_pdu(PDU {
                     link_id: device.link_id()?,
                     transaction_number: self.transaction_number,
                     pdu,
                 })
-                .await;
+                .await?
         }
 
-        /*
-        let num_chunks = self.pdu.chunks(15).count();
-        for (i, chunk) in self.pdu.chunks(15).enumerate() {
-            let pdu = if i == 0 {
-                GenericProvisioningPDU::TransactionStart(TransactionStart {
-                    seg_n: num_chunks as u8 - 1,
-                    total_len: self.pdu.len() as u16,
-                    fcs: self.fcs,
-                    data: Vec::from_slice(chunk)?,
-                })
-            } else {
-                GenericProvisioningPDU::TransactionContinuation(TransactionContinuation {
-                    segment_index: i as u8 + 1,
-                    data: Vec::from_slice(chunk)?,
-                })
-            };
-
-            let pdu = PDU {
-                link_id: device.link_id()?,
-                transaction_number: self.transaction_number,
-                pdu,
-            };
-
-            device.tx_pdu(pdu).await?;
-        }
-         */
         Ok(())
     }
 

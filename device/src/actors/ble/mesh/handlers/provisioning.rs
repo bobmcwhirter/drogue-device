@@ -1,6 +1,6 @@
 use crate::actors::ble::mesh::device::Device;
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
-use crate::drivers::ble::mesh::crypto::{aes_ccm_decrypt, aes_cmac, CryptoBuffer, s1};
+use crate::drivers::ble::mesh::crypto::{aes_ccm_decrypt, aes_cmac, s1};
 use crate::drivers::ble::mesh::provisioning::{
     Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey,
     Random, Start,
@@ -10,7 +10,6 @@ use core::convert::TryFrom;
 use core::marker::PhantomData;
 use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-use p256::elliptic_curve::AffineXCoordinate;
 use p256::EncodedPoint;
 use rand_core::RngCore;
 
@@ -102,21 +101,21 @@ where
             ProvisioningPDU::Invite(invite) => {
                 defmt::info!(">> ProvisioningPDU::Invite");
                 self.state = State::Invite;
-                self.transcript.add_invite(&invite);
+                self.transcript.add_invite(&invite)?;
                 device.tx_capabilities()?;
-                self.transcript.add_capabilities(&device.capabilities);
+                self.transcript.add_capabilities(&device.capabilities)?;
             }
             ProvisioningPDU::Capabilities(_) => {}
             ProvisioningPDU::Start(start) => {
                 defmt::info!(">> ProvisioningPDU::Start");
-                self.transcript.add_start(&start);
-                let auth_value = self.determine_auth_value(device, &start);
+                self.transcript.add_start(&start)?;
+                let auth_value = self.determine_auth_value(device, &start)?;
                 // TODO actually let the device/app/thingy know what it is so that it can blink/flash/accept input
                 self.auth_value.replace(auth_value);
             }
             ProvisioningPDU::PublicKey(public_key) => {
                 defmt::info!(">> ProvisioningPDU::PublicKey");
-                self.transcript.add_pubkey_provisioner(&public_key);
+                self.transcript.add_pubkey_provisioner(&public_key)?;
                 // TODO remove unwrap
                 let peer_pk =
                     p256::PublicKey::from_encoded_point(&EncodedPoint::from_affine_coordinates(
@@ -125,7 +124,7 @@ where
                         false,
                     ))
                     .unwrap();
-                device.key_manager.add_peer_public_key(peer_pk);
+                device.key_manager.set_peer_public_key(peer_pk);
                 let pk = device.public_key();
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
@@ -134,7 +133,7 @@ where
                     x: <[u8; 32]>::try_from(x.as_slice()).map_err(|_| ())?,
                     y: <[u8; 32]>::try_from(y.as_slice()).map_err(|_| ())?,
                 };
-                self.transcript.add_pubkey_device(&pk);
+                self.transcript.add_pubkey_device(&pk)?;
                 device.tx_provisioning_pdu(ProvisioningPDU::PublicKey(pk));
             }
             ProvisioningPDU::InputComplete => {
@@ -142,9 +141,8 @@ where
             }
             ProvisioningPDU::Confirmation(confirmation) => {
                 defmt::info!(">> ProvisioningPDU::Confirmation {}", confirmation);
-                let confirmation_device = self.confirmation_device(device);
-                defmt::info!(">>>>>>>>> {}", confirmation_device);
-                device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(confirmation_device?));
+                let confirmation_device = self.confirmation_device(device)?;
+                device.tx_provisioning_pdu(ProvisioningPDU::Confirmation(confirmation_device));
             }
             ProvisioningPDU::Random(random) => {
                 defmt::info!(">> ProvisioningPDU::Random");
@@ -187,7 +185,7 @@ where
             ProvisioningPDU::Complete => {
                 defmt::info!(">> ProvisioningPDU::Complete");
             }
-            ProvisioningPDU::Failed(failed) => {
+            ProvisioningPDU::Failed(_failed) => {
                 defmt::info!(">> ProvisioningPDU::Failed");
             }
         }
@@ -202,9 +200,9 @@ where
         defmt::info!("confirmation_device C");
         let mut bytes: Vec<u8, 32> = Vec::new();
         defmt::info!("confirmation_device D");
-        bytes.extend_from_slice(&device.key_manager.random);
+        bytes.extend_from_slice(&device.key_manager.random)?;
         defmt::info!("confirmation_device E");
-        bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(())?.get_bytes());
+        bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(())?.get_bytes())?;
         defmt::info!("confirmation_device F");
         let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
         defmt::info!("confirmation_device G");
@@ -219,8 +217,8 @@ where
         Ok(Confirmation { confirmation })
     }
 
-    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> AuthValue {
-        match (&start.authentication_action, &start.authentication_size) {
+    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> Result<AuthValue,()> {
+        Ok(match (&start.authentication_action, &start.authentication_size) {
             (
                 OOBAction::Output(OutputOOBAction::Blink)
                 | OOBAction::Output(OutputOOBAction::Beep)
@@ -250,18 +248,18 @@ where
                 OOBAction::Output(OutputOOBAction::OutputAlphanumeric),
                 OOBSize::MaximumSize(size),
             ) => {
-                let auth_raw = self.random_alphanumeric(&device, *size);
+                let auth_raw = self.random_alphanumeric(&device, *size)?;
                 AuthValue::OutputAlphanumeric(auth_raw)
             }
             (OOBAction::Input(InputOOBAction::InputAlphanumeric), OOBSize::MaximumSize(size)) => {
-                let auth_raw = self.random_alphanumeric(&device, *size);
+                let auth_raw = self.random_alphanumeric(&device, *size)?;
                 AuthValue::InputAlphanumeric(auth_raw)
             }
             _ => {
                 // zeros!
                 AuthValue::None
             }
-        }
+        })
     }
 
     fn random_physical_oob(&self, device: &Device<T, R>, size: u8) -> u32 {
@@ -334,20 +332,20 @@ where
         }
     }
 
-    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Vec<u8, 8> {
+    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Result<Vec<u8, 8>, ()> {
         let mut random = Vec::new();
         for _ in 0..size {
             loop {
                 let candidate = device.next_random_u8();
                 if candidate >= 64 && candidate <= 90 {
                     // Capital ASCII letters A-Z
-                    random.push(candidate);
+                    random.push(candidate).map_err(|_|())?;
                 } else if candidate >= 48 && candidate <= 57 {
                     // ASCII numbers 0-9
-                    random.push(candidate);
+                    random.push(candidate).map_err(|_|())?;
                 }
             }
         }
-        random
+        Ok(random)
     }
 }

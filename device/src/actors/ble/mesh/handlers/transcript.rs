@@ -2,7 +2,7 @@ use aes::Aes128;
 use cmac::Cmac;
 use cmac::crypto_mac::Output;
 use crate::drivers::ble::mesh::provisioning::{
-    Capabilities, Invite, ProvisioningPDU, PublicKey, Start,
+    Capabilities, Invite, PublicKey, Start,
 };
 use heapless::Vec;
 use crate::drivers::ble::mesh::crypto::s1;
@@ -37,13 +37,13 @@ impl Transcript {
 
     pub(crate) fn add_pubkey_provisioner(&mut self, pk: &PublicKey) -> Result<(), ()> {
         let mut vec: Vec<u8, 65> = Vec::new();
-        pk.emit(&mut vec);
+        pk.emit(&mut vec)?;
         self.confirmation_inputs.extend_from_slice(&vec.as_slice()[1..])
     }
 
     pub(crate) fn add_pubkey_device(&mut self, pk: &PublicKey) -> Result<(), ()> {
         let mut vec: Vec<u8, 65> = Vec::new();
-        pk.emit(&mut vec);
+        pk.emit(&mut vec)?;
         self.confirmation_inputs.extend_from_slice(&vec.as_slice()[1..])
     }
 

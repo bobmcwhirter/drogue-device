@@ -1,15 +1,10 @@
-use crate::drivers::ble::mesh::transport::{Handler, Transport};
+use crate::drivers::ble::mesh::transport::Transport;
 use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
 use core::future::Future;
-use heapless::Vec;
-use nrf_softdevice::Softdevice;
 
 use crate::actors::ble::mesh::device::Device;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
-use crate::drivers::ble::mesh::PB_ADV;
-use core::cell::UnsafeCell;
-use core::ptr::slice_from_raw_parts;
 use core::marker::PhantomData;
 use rand_core::RngCore;
 
@@ -69,7 +64,7 @@ where
             .device
             .mount(spawner, Device::new(config.0, config.1, config.2, tx));
 
-        let rx = self.rx.mount(
+        let _rx = self.rx.mount(
             spawner,
             Rx {
                 transport: &self.transport,

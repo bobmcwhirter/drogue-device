@@ -1,14 +1,13 @@
 use super::handlers::ProvisioningBearerControlHander;
 use super::handlers::TransactionHandler;
-use crate::actors::ble::mesh::bearer::TxMessage::Transmit;
 use crate::actors::ble::mesh::bearer::{Tx, TxMessage};
 use crate::actors::ble::mesh::handlers::ProvisioningHandler;
 use crate::actors::ble::mesh::key_manager::KeyManager;
 use crate::drivers::ble::mesh::bearer::advertising;
-use crate::drivers::ble::mesh::bearer::advertising::{PBAdvError, PDU};
+use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::generic_provisioning::{
-    GenericProvisioningPDU, ProvisioningBearerControl, TransactionStart,
+    GenericProvisioningPDU, ProvisioningBearerControl
 };
 use crate::drivers::ble::mesh::provisioning::{Capabilities, ProvisioningPDU};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
@@ -20,7 +19,6 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use embassy::time::{Duration, Ticker};
 use futures::future::{select, Either};
 use futures::{pin_mut, StreamExt};
-use heapless::spsc::Queue;
 use heapless::Vec;
 use p256::PublicKey;
 use rand_core::RngCore;
@@ -101,15 +99,14 @@ where
     }
 
     pub(crate) async fn tx(&self, data: &[u8]) -> Result<(), ()> {
-        self.tx.request(TxMessage::Transmit(data)).unwrap().await;
-        defmt::info!("TRANSMITTED");
+        self.tx.request(TxMessage::Transmit(data)).map_err(|_|())?.await;
         Ok(())
     }
 
     pub(crate) async fn tx_pdu(&self, pdu: PDU) -> Result<(), ()> {
         defmt::info!("<< outbound << {}", pdu);
         let mut xmit: Vec<u8, 128> = Vec::new();
-        pdu.emit(&mut xmit);
+        pdu.emit(&mut xmit)?;
         self.tx(&*xmit).await
     }
 
@@ -166,7 +163,7 @@ where
     R: RngCore + 'static,
 {
     fn handle<'m>(&self, message: Vec<u8, 384>) {
-        self.notify(message);
+        self.notify(message).ok();
     }
 }
 
@@ -197,7 +194,7 @@ where
                 pin_mut!(inbox_fut);
                 pin_mut!(ticker_fut);
 
-                match select(inbox_fut, ticker_fut).await {
+                let result = match select(inbox_fut, ticker_fut).await {
                     Either::Left((ref mut msg, _)) => match msg {
                         Some(message) => {
                             let data = message.message();
@@ -208,8 +205,6 @@ where
                                 if let Ok(pdu) = pdu {
                                     match pdu.pdu {
                                         GenericProvisioningPDU::TransactionStart(tx_start) => {
-                                            let current_link_id =
-                                                self.provisioning_bearer_control.borrow().link_id;
                                             if let Some(current_link_id) =
                                                 self.provisioning_bearer_control.borrow().link_id
                                             {
@@ -221,15 +216,17 @@ where
                                                             pdu.transaction_number,
                                                             &tx_start,
                                                         )
-                                                        .await;
+                                                        .await
+                                                } else {
+                                                    Ok(())
                                                 }
+                                            } else {
+                                                Ok(())
                                             }
                                         }
                                         GenericProvisioningPDU::TransactionContinuation(
                                             tx_cont,
                                         ) => {
-                                            let current_link_id =
-                                                self.provisioning_bearer_control.borrow().link_id;
                                             if let Some(current_link_id) =
                                                 self.provisioning_bearer_control.borrow().link_id
                                             {
@@ -241,13 +238,15 @@ where
                                                             pdu.transaction_number,
                                                             &tx_cont,
                                                         )
-                                                        .await;
+                                                        .await
+                                                } else {
+                                                    Ok(())
                                                 }
+                                            } else {
+                                                Ok(())
                                             }
                                         }
                                         GenericProvisioningPDU::TransactionAck => {
-                                            let current_link_id =
-                                                self.provisioning_bearer_control.borrow().link_id;
                                             if let Some(current_link_id) =
                                                 self.provisioning_bearer_control.borrow().link_id
                                             {
@@ -258,8 +257,12 @@ where
                                                             self,
                                                             pdu.transaction_number,
                                                         )
-                                                        .await;
+                                                        .await
+                                                } else {
+                                                    Ok(())
                                                 }
+                                            } else {
+                                                Ok(())
                                             }
                                         }
                                         GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
@@ -267,14 +270,20 @@ where
                                             self.provisioning_bearer_control
                                                 .borrow_mut()
                                                 .handle(self, pdu.link_id, &pbc)
-                                                .await;
+                                                .await
                                         }
                                     }
+                                } else {
+                                    Ok(())
                                 }
+                            } else {
+                                // Not a PB-ADV
+                                Ok(())
                             }
                         }
                         _ => {
                             // ignore
+                            Ok(())
                         }
                     },
                     Either::Right((_, _)) => {
@@ -283,10 +292,18 @@ where
                                 .request(TxMessage::UnprovisionedBeacon(self.uuid))
                                 .unwrap()
                                 .await;
+                            Ok(())
+                        } else {
+                            Ok(())
                         }
                     }
+                };
+                if let Err(err) = result {
+                    defmt::error!("BLE-Mesh error: {}", err);
                 }
-                self.handle_transmit().await;
+                if let Err(err) = self.handle_transmit().await {
+                    defmt::error!("BLE-Mesh error: {}", err);
+                }
             }
         }
     }

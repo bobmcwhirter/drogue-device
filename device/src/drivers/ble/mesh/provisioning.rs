@@ -33,8 +33,8 @@ impl Invite {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::INVITE );
-        xmit.push( self.attention_duration );
+        xmit.push( ProvisioningPDU::INVITE ).map_err(|_|())?;
+        xmit.push( self.attention_duration ).map_err(|_|())?;
         Ok(())
     }
 }
@@ -81,15 +81,15 @@ impl Capabilities {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
-        xmit.push(ProvisioningPDU::CAPABILITIES);
-        xmit.push(self.number_of_elements);
-        self.algorithms.emit(xmit);
-        self.public_key_type.emit(xmit);
-        self.static_oob_type.emit(xmit);
-        self.output_oob_size.emit(xmit);
-        self.output_oob_action.emit(xmit);
-        self.input_oob_size.emit(xmit);
-        self.input_oob_action.emit(xmit);
+        xmit.push(ProvisioningPDU::CAPABILITIES).map_err(|_|())?;
+        xmit.push(self.number_of_elements).map_err(|_|())?;
+        self.algorithms.emit(xmit)?;
+        self.public_key_type.emit(xmit)?;
+        self.static_oob_type.emit(xmit)?;
+        self.output_oob_size.emit(xmit)?;
+        self.output_oob_action.emit(xmit)?;
+        self.input_oob_size.emit(xmit)?;
+        self.input_oob_action.emit(xmit)?;
         Ok(())
     }
 }
@@ -146,12 +146,12 @@ impl Start {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::START);
-        self.algorithm.emit( xmit );
-        self.public_key.emit( xmit );
-        self.authentication_method.emit( xmit );
-        self.authentication_action.emit( xmit );
-        self.authentication_size.emit( xmit );
+        xmit.push( ProvisioningPDU::START).map_err(|_|())?;
+        self.algorithm.emit( xmit )?;
+        self.public_key.emit( xmit )?;
+        self.authentication_method.emit( xmit )?;
+        self.authentication_action.emit( xmit )?;
+        self.authentication_size.emit( xmit )?;
         Ok(())
     }
 }
@@ -175,9 +175,9 @@ impl PublicKey {
     }
 
     pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8,N>) -> Result<(), ()>{
-        xmit.push( ProvisioningPDU::PUBLIC_KEY );
-        xmit.extend_from_slice( &self.x );
-        xmit.extend_from_slice( &self.y );
+        xmit.push( ProvisioningPDU::PUBLIC_KEY ).map_err(|_|())?;
+        xmit.extend_from_slice( &self.x )?;
+        xmit.extend_from_slice( &self.y )?;
         Ok(())
     }
 }
@@ -199,8 +199,8 @@ impl Confirmation {
     }
 
     fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()> {
-        xmit.push( ProvisioningPDU::CONFIRMATION );
-        xmit.extend_from_slice(&self.confirmation);
+        xmit.push( ProvisioningPDU::CONFIRMATION ).map_err(|_|())?;
+        xmit.extend_from_slice(&self.confirmation)?;
         Ok(())
     }
 }
@@ -222,8 +222,8 @@ impl Random {
     }
 
     fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(),()> {
-        xmit.push( ProvisioningPDU::RANDOM );
-        xmit.extend_from_slice( &self.random);
+        xmit.push( ProvisioningPDU::RANDOM ).map_err(|_|())?;
+        xmit.extend_from_slice( &self.random)?;
         Ok(())
     }
 }
@@ -297,30 +297,38 @@ impl ProvisioningPDU {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         match self {
-            ProvisioningPDU::Invite(_) => {}
-            ProvisioningPDU::Capabilities(capabilities) => {
-                capabilities.emit(xmit);
+            ProvisioningPDU::Invite(_) => {
+                unimplemented!()
             }
-            ProvisioningPDU::Start { .. } => {}
+            ProvisioningPDU::Capabilities(capabilities) => {
+                capabilities.emit(xmit)
+            }
+            ProvisioningPDU::Start(_) => {
+                unimplemented!()
+            }
             ProvisioningPDU::PublicKey(public_key) => {
-                public_key.emit(xmit);
+                public_key.emit(xmit)
             }
             ProvisioningPDU::InputComplete => {
-                xmit.push( Self::INPUT_COMPLETE );
+                xmit.push( Self::INPUT_COMPLETE ).map_err(|_|())
             }
             ProvisioningPDU::Confirmation(confirmation) => {
-                confirmation.emit(xmit);
+                confirmation.emit(xmit)
             }
             ProvisioningPDU::Random(random) => {
-                random.emit(xmit);
+                random.emit(xmit)
             }
-            ProvisioningPDU::Data { .. } => {}
+            ProvisioningPDU::Data(_) => {
+                unimplemented!()
+            }
             ProvisioningPDU::Complete => {
-                xmit.push(Self::COMPLETE);
+                xmit.push(Self::COMPLETE).map_err(|_|())
             }
-            ProvisioningPDU::Failed { .. } => {}
+            ProvisioningPDU::Failed(_) => {
+                unimplemented!()
+            }
         }
     }
 
@@ -393,7 +401,7 @@ impl Algorithms {
         Ok(algos)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         let bits: Option<u16> = self
             .0
             .iter()
@@ -406,14 +414,15 @@ impl Algorithms {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes());
+        xmit.extend_from_slice(&bits.to_be_bytes())
     }
 }
 
 impl Default for Algorithms {
     fn default() -> Self {
         let mut algos = Self::new();
-        algos.push(Algorithm::P256);
+        // infallible
+        algos.push(Algorithm::P256).ok();
         algos
     }
 }
@@ -440,11 +449,11 @@ impl PublicKeyType {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         if self.available {
-            xmit.push(0b1);
+            xmit.push(0b1).map_err(|_|())
         } else {
-            xmit.push(0b0);
+            xmit.push(0b0).map_err(|_|())
         }
     }
 }
@@ -490,11 +499,11 @@ impl StaticOOBType {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         if self.available {
-            xmit.push(0b1);
+            xmit.push(0b1).map_err(|_|())
         } else {
-            xmit.push(0b0);
+            xmit.push(0b0).map_err(|_|())
         }
     }
 }
@@ -522,13 +531,13 @@ impl OOBSize {
         }
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         match self {
             OOBSize::NotSupported => {
-                xmit.push(0);
+                xmit.push(0).map_err(|_|())
             }
             OOBSize::MaximumSize(size) => {
-                xmit.push(*size);
+                xmit.push(*size).map_err(|_|())
             }
         }
     }
@@ -605,7 +614,7 @@ impl OutputOOBActions {
         Ok(actions)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         let bits = self
             .0
             .iter()
@@ -614,7 +623,7 @@ impl OutputOOBActions {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes());
+        xmit.extend_from_slice(&bits.to_be_bytes())
     }
 }
 
@@ -687,7 +696,7 @@ impl InputOOBActions {
         Ok(actions)
     }
 
-    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), ()>{
         let bits = self
             .0
             .iter()
@@ -696,7 +705,7 @@ impl InputOOBActions {
 
         let bits = bits.unwrap_or(0);
 
-        xmit.extend_from_slice(&bits.to_be_bytes());
+        xmit.extend_from_slice(&bits.to_be_bytes())
     }
 }
 

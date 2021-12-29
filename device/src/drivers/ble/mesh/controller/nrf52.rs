@@ -4,7 +4,7 @@ use crate::drivers::ble::mesh::{MESH_BEACON, PB_ADV};
 use core::future::Future;
 use core::mem;
 use core::ptr::slice_from_raw_parts;
-use embassy::executor::{SpawnToken, Spawner};
+use core::num::NonZeroU32;
 use heapless::Vec;
 use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
@@ -65,23 +65,31 @@ pub struct SoftdeviceRng {
 impl RngCore for SoftdeviceRng {
     fn next_u32(&mut self) -> u32 {
         let mut bytes = [0;4];
-        random_bytes(self.sd, &mut bytes);
+        self.fill_bytes(&mut bytes);
         u32::from_be_bytes(bytes)
     }
 
     fn next_u64(&mut self) -> u64 {
         let mut bytes = [0;8];
-        random_bytes(self.sd, &mut bytes);
+        self.fill_bytes(&mut bytes);
         u64::from_be_bytes(bytes)
     }
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {
-        random_bytes(self.sd, dest);
+        loop {
+            match self.try_fill_bytes(dest) {
+                Ok(_) => {
+                    return
+                },
+                Err(_) => {
+                    // loop again
+                }
+            }
+        }
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
-        random_bytes(self.sd, dest);
-        Ok(())
+        random_bytes(self.sd, dest).map_err(|_| unsafe{ NonZeroU32::new_unchecked(99) }.into())
     }
 }
 
@@ -112,11 +120,11 @@ impl Transport for Nrf52BleMeshTransport {
     ) -> Self::SendUnprovisionedBeaconFuture<'m> {
         async move {
             let mut adv_data: Vec<u8, 31> = Vec::new();
-            adv_data.extend_from_slice(&[20, MESH_BEACON, 0x00]);
+            adv_data.extend_from_slice(&[20, MESH_BEACON, 0x00]).ok();
 
-            adv_data.extend_from_slice(&uuid.0);
+            adv_data.extend_from_slice(&uuid.0).ok();
 
-            adv_data.extend_from_slice(&[0xa0, 0x40]).unwrap();
+            adv_data.extend_from_slice(&[0xa0, 0x40]).ok();
 
             let adv = peripheral::NonconnectableAdvertisement::NonscannableUndirected {
                 adv_data: &*adv_data,
@@ -130,7 +138,7 @@ impl Transport for Nrf52BleMeshTransport {
                     ..Default::default()
                 },
             )
-            .await;
+            .await.ok();
         }
     }
 
@@ -152,7 +160,7 @@ impl Transport for Nrf52BleMeshTransport {
                     ..Default::default()
                 },
             )
-            .await;
+            .await.ok();
         }
     }
 
@@ -170,7 +178,7 @@ impl Transport for Nrf52BleMeshTransport {
                 ..Default::default()
             };
             loop {
-                let result = central::scan::<_, ()>(self.sd, &config, |event| {
+                central::scan::<_, ()>(self.sd, &config, |event| {
                     let data = event.data;
                     let data = unsafe { &*slice_from_raw_parts(data.p_data, data.len as usize) };
                     if data.len() >= 2 && data[1] == PB_ADV {
@@ -178,7 +186,7 @@ impl Transport for Nrf52BleMeshTransport {
                     }
                     None
                 })
-                .await;
+                .await.ok();
             }
         }
     }
