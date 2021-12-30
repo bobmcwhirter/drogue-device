@@ -1,5 +1,5 @@
 use core::convert::TryInto;
-use defmt::Format;
+use defmt::{Format, Formatter};
 use heapless::Vec;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
@@ -253,6 +253,88 @@ impl Data {
                 mic: data[26..34].try_into().map_err(|_| ParseError::InvalidLength)?,
             })
         }
+    }
+}
+
+/// The decrypted provisioning data wrapped in `Data` above.
+pub struct ProvisioningData {
+    network_key: [u8;16],
+    key_index: u16,
+    key_refresh_flag: KeyRefreshFlag,
+    iv_update_flag: IVUpdateFlag,
+    iv_index: u32,
+    unicast_address: u16,
+}
+
+impl ProvisioningData {
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
+        if data.len() < 25 {
+            Err(ParseError::InvalidLength)
+        } else {
+            let network_key = &data[0..16];
+            let key_index = u16::from_be_bytes( [ data[16], data[17] ]);
+            let flags = data[18];
+            let iv_index = u32::from_be_bytes( [ data[19], data[20], data[21], data[22]]);
+            let unicast_address = u16::from_be_bytes( [ data[23], data[24]]);
+
+            Ok(Self {
+                network_key: network_key.try_into().map_err(|_|ParseError::InvalidLength)?,
+                key_index,
+                key_refresh_flag: KeyRefreshFlag::parse(flags & 0b00000001),
+                iv_update_flag:   IVUpdateFlag::parse(flags & 0b00000010),
+                iv_index,
+                unicast_address,
+            })
+        }
+    }
+}
+
+// TODO: probably move this elsewhere
+#[derive(Format)]
+pub enum KeyRefreshFlag {
+    Phase0,
+    Phase2,
+}
+
+impl KeyRefreshFlag {
+    fn parse(data: u8) -> Self {
+        if data == 0 {
+            Self::Phase0
+        } else {
+            Self::Phase2
+        }
+    }
+}
+
+// TODO: probably move this elsewhere
+#[derive(Format)]
+pub enum IVUpdateFlag {
+    NormalOperation,
+    UpdateActive,
+}
+
+impl IVUpdateFlag {
+    fn parse(data: u8) -> Self {
+        if data == 0 {
+            Self::NormalOperation
+        } else {
+            Self::UpdateActive
+
+        }
+    }
+}
+
+
+impl Format for ProvisioningData {
+    fn format(&self, fmt: Formatter) {
+        defmt::write!(fmt, "ProvisioningData( network_key={:x}, key_index: {}, flags={}:{}, iv_index={}, unicast_address={:x}",
+            self.network_key,
+            self.key_index,
+            self.key_refresh_flag,
+            self.iv_update_flag,
+            self.iv_index,
+            self.unicast_address,
+        )
     }
 }
 

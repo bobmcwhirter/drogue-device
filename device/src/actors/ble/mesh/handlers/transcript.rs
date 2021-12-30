@@ -9,7 +9,6 @@ use crate::drivers::ble::mesh::crypto::s1;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
 pub struct Transcript {
-    // TODO improve the size of this vec
     confirmation_inputs: Vec<u8, 256>,
 }
 

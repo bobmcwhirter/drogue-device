@@ -6,25 +6,27 @@ use crate::actors::ble::mesh::device::Device;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 use core::marker::PhantomData;
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
-pub struct BleMeshBearer<T, R>
+pub struct BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     transport: T,
     start: ActorContext<Start<T>>,
-    rx: ActorContext<Rx<T, R>>,
+    rx: ActorContext<Rx<T, R, S>>,
     tx: ActorContext<Tx<T>>,
-    device: ActorContext<Device<T, R>>,
-    _marker: PhantomData<R>,
+    device: ActorContext<Device<T, R, S>>,
 }
 
-impl<T, R> BleMeshBearer<T, R>
+impl<T, R, S> BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
@@ -33,23 +35,23 @@ where
             rx: ActorContext::new(),
             tx: ActorContext::new(),
             device: ActorContext::new(),
-            _marker: PhantomData,
         }
     }
 }
 
-impl<T, R> Package for BleMeshBearer<T, R>
+impl<T, R, S> Package for BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     type Primary = Tx<T>;
-    type Configuration = (R, Uuid, Capabilities);
+    type Configuration = (R, S, Uuid, Capabilities);
 
-    fn mount<S: ActorSpawner>(
+    fn mount<AS: ActorSpawner>(
         &'static self,
         config: Self::Configuration,
-        spawner: S,
+        spawner: AS,
     ) -> Address<Self::Primary> {
         let _ = self.start.mount(spawner, Start(&self.transport));
 
@@ -60,15 +62,15 @@ where
             },
         );
 
-        let coordinator = self
+        let device = self
             .device
-            .mount(spawner, Device::new(config.0, config.1, config.2, tx));
+            .mount(spawner, Device::new(config.0, config.1, config.2, config.3, tx));
 
         let _rx = self.rx.mount(
             spawner,
             Rx {
                 transport: &self.transport,
-                handler: coordinator,
+                handler: device,
             },
         );
 
@@ -95,19 +97,21 @@ impl<T> Actor for Start<T> where T: Transport + 'static {
     }
 }
 
-struct Rx<T, R>
+struct Rx<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     transport: &'static T,
-    handler: Address<Device<T,R>>,
+    handler: Address<Device<T,R, S>>,
 }
 
-impl<T, R> Actor for Rx<T, R>
+impl<T, R, S> Actor for Rx<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     type OnMountFuture<'m, M>
     where

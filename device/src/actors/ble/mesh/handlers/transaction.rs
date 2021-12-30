@@ -11,23 +11,26 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::Format;
 use heapless::Vec;
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
-pub struct TransactionHandler<T, R>
+pub struct TransactionHandler<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     inbound_segments: RefCell<Option<InboundSegments>>,
     inbound_acks: RefCell<Option<u8>>,
     outbound_segments: Option<OutboundSegments>,
-    _marker: PhantomData<(T, R)>,
+    _marker: PhantomData<(T, R, S)>,
 }
 
-impl<T, R> TransactionHandler<T, R>
+impl<T, R, S> TransactionHandler<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -54,7 +57,7 @@ where
 
     async fn check_ack(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         transaction_number: u8,
     ) -> Result<bool, DeviceError> {
         if !self.already_acked(transaction_number) {
@@ -67,7 +70,7 @@ where
 
     async fn do_ack(
         &self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         transaction_number: u8,
     ) -> Result<(), DeviceError> {
         device.tx_transaction_ack(transaction_number).await?;
@@ -88,7 +91,7 @@ where
 
     pub(crate) async fn handle_transaction_start(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         transaction_number: u8,
         transaction_start: &TransactionStart,
     ) -> Result<(), DeviceError> {
@@ -121,7 +124,7 @@ where
 
     pub(crate) async fn handle_transaction_continuation(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         transaction_number: u8,
         transaction_continuation: &TransactionContinuation,
     ) -> Result<(), DeviceError> {
@@ -163,7 +166,7 @@ where
 
     pub(crate) async fn handle_outbound(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         pdu: Option<ProvisioningPDU>,
     ) -> Result<(), DeviceError> {
         match pdu {
@@ -189,7 +192,7 @@ where
 
     pub(crate) async fn handle_transaction_ack(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         transaction_number: u8,
     ) -> Result<(), DeviceError> {
         match &self.outbound_segments {
@@ -296,10 +299,11 @@ impl OutboundSegments {
         }
     }
 
-    pub async fn transmit<T, R>(&self, device: &Device<T, R>) -> Result<(), DeviceError>
+    pub async fn transmit<T, R, S>(&self, device: &Device<T, R, S>) -> Result<(), DeviceError>
     where
         T: Transport + 'static,
-        R: RngCore + 'static,
+        R: RngCore + CryptoRng + 'static,
+        S: KeyStorage + 'static,
     {
         if self.first.swap(false, Ordering::SeqCst) {
             defmt::trace!("<< Transaction({})", self.transaction_number);

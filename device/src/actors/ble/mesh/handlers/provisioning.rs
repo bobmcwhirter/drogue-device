@@ -1,10 +1,7 @@
 use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::actors::ble::mesh::handlers::transcript::Transcript;
 use crate::drivers::ble::mesh::crypto::{aes_ccm_decrypt, aes_cmac, s1};
-use crate::drivers::ble::mesh::provisioning::{
-    Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningPDU, PublicKey,
-    Random, Start,
-};
+use crate::drivers::ble::mesh::provisioning::{Confirmation, InputOOBAction, OOBAction, OOBSize, OutputOOBAction, ProvisioningData, ProvisioningPDU, PublicKey, Random, Start};
 use crate::drivers::ble::mesh::transport::Transport;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
@@ -12,22 +9,9 @@ use cmac::crypto_mac::InvalidKeyLength;
 use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
 use crate::drivers::ble::mesh::InsufficientBuffer;
-
-enum State {
-    None,
-    Invite,
-    Capabilities,
-    Start,
-    PublicKey,
-    InputComplete,
-    Confirmation,
-    Random,
-    Data,
-    Complete,
-    Failed,
-}
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
 pub enum AuthValue {
     None,
@@ -67,28 +51,32 @@ impl AuthValue {
     }
 }
 
-pub struct ProvisioningHandler<T, R>
+pub struct ProvisioningHandler<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore,
+    S: KeyStorage + 'static,
 {
-    state: State,
     transcript: Transcript,
     auth_value: Option<AuthValue>,
+    random_device: [u8; 16],
     random_provisioner: Option<[u8;16]>,
-    _marker: PhantomData<(T, R)>,
+    _marker: PhantomData<(T, R, S)>,
 }
 
-impl<T, R> ProvisioningHandler<T, R>
+impl<T, R, S> ProvisioningHandler<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(rng: &mut R) -> Self {
+        let mut random_device = [0;16];
+        rng.fill_bytes(&mut random_device);
         Self {
-            state: State::None,
             transcript: Transcript::new(),
             auth_value: None,
+            random_device,
             random_provisioner: None,
             _marker: PhantomData,
         }
@@ -96,13 +84,12 @@ where
 
     pub(crate) async fn handle(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         mut pdu: ProvisioningPDU,
     ) -> Result<(), DeviceError> {
         match pdu {
             ProvisioningPDU::Invite(invite) => {
                 defmt::trace!(">> Invite");
-                self.state = State::Invite;
                 self.transcript.add_invite(&invite)?;
                 device.tx_capabilities();
                 self.transcript.add_capabilities(&device.capabilities)?;
@@ -135,7 +122,7 @@ where
                     .unwrap();
 
                 device.key_manager.set_peer_public_key(peer_pk);
-                let pk = device.public_key();
+                let pk = device.public_key()?;
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
                 let y = xy.y().unwrap();
@@ -162,7 +149,7 @@ where
                 defmt::trace!(">> Random");
                 defmt::trace!(">>   {}", random);
                 device.tx_provisioning_pdu(ProvisioningPDU::Random(Random {
-                    random: device.key_manager.random,
+                    random: self.random_device,
                 }));
                 self.random_provisioner.replace( random.random );
             }
@@ -173,7 +160,7 @@ where
                 let mut provisioning_salt = [0; 48];
                 provisioning_salt[0..16].copy_from_slice( &self.transcript.confirmation_salt()?.into_bytes());
                 provisioning_salt[16..32].copy_from_slice( self.random_provisioner.as_ref().unwrap() );
-                provisioning_salt[32..48].copy_from_slice( &device.key_manager.random );
+                provisioning_salt[32..48].copy_from_slice( &self.random_device );
                 let provisioning_salt = &s1( &provisioning_salt )?.into_bytes()[0..];
 
                 let session_key = &device.key_manager.k1( &provisioning_salt, b"prsk")?.into_bytes()[0..];
@@ -185,7 +172,9 @@ where
                 let result = aes_ccm_decrypt(&session_key, &session_nonce, &mut data.encrypted, &data.mic);
                 match result {
                     Ok(_) => {
-                        defmt::info!("decrypted!");
+                        let provisioning_data = ProvisioningData::parse(&data.encrypted)?;
+                        defmt::debug!("** provisioning_data {}", provisioning_data);
+                        device.key_manager.set_provisioning_data(&provisioning_data);
                     }
                     Err(_) => {
                         defmt::info!("decryption error!");
@@ -203,11 +192,11 @@ where
         Ok(())
     }
 
-    fn confirmation_device(&self, device: &Device<T, R>) -> Result<Confirmation, DeviceError> {
+    fn confirmation_device(&self, device: &Device<T, R, S>) -> Result<Confirmation, DeviceError> {
         let salt = self.transcript.confirmation_salt()?;
         let confirmation_key = device.key_manager.k1(&*salt.into_bytes(), b"prck")?;
         let mut bytes: Vec<u8, 32> = Vec::new();
-        bytes.extend_from_slice(&device.key_manager.random).map_err(|_|DeviceError::InsufficientBuffer)?;
+        bytes.extend_from_slice(&self.random_device).map_err(|_|DeviceError::InsufficientBuffer)?;
         bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(DeviceError::InsufficientBuffer)?.get_bytes()).map_err(|_|DeviceError::InsufficientBuffer)?;
         let confirmation_device = aes_cmac(&confirmation_key.into_bytes(), &bytes)?;
 
@@ -219,7 +208,7 @@ where
         Ok(Confirmation { confirmation })
     }
 
-    fn determine_auth_value(&mut self, device: &Device<T, R>, start: &Start) -> Result<AuthValue,DeviceError> {
+    fn determine_auth_value(&mut self, device: &Device<T, R, S>, start: &Start) -> Result<AuthValue,DeviceError> {
         Ok(match (&start.authentication_action, &start.authentication_size) {
             (
                 OOBAction::Output(OutputOOBAction::Blink)
@@ -264,7 +253,7 @@ where
         })
     }
 
-    fn random_physical_oob(&self, device: &Device<T, R>, size: u8) -> u32 {
+    fn random_physical_oob(&self, device: &Device<T, R, S>, size: u8) -> u32 {
         // "select a random integer between 0 and 10 to the power of the Authentication Size exclusive"
         //
         // ... which could be an absolute metric tonne of beeps/twists/pushes if AuthSize is large-ish.
@@ -281,7 +270,7 @@ where
         }
     }
 
-    fn random_numeric(&self, device: &Device<T, R>, size: u8) -> u32 {
+    fn random_numeric(&self, device: &Device<T, R, S>, size: u8) -> u32 {
         loop {
             let candidate = device.next_random_u32();
 
@@ -334,7 +323,7 @@ where
         }
     }
 
-    fn random_alphanumeric(&self, device: &Device<T, R>, size: u8) -> Result<Vec<u8, 8>, DeviceError> {
+    fn random_alphanumeric(&self, device: &Device<T, R, S>, size: u8) -> Result<Vec<u8, 8>, DeviceError> {
         let mut random = Vec::new();
         for _ in 0..size {
             loop {

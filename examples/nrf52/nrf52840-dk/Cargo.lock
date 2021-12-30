@@ -420,6 +420,7 @@ dependencies = [
  "embassy",
  "embassy-hal-common",
  "embassy-nrf",
+ "embassy-traits",
  "embedded-hal",
  "futures",
  "heapless",
@@ -524,6 +525,7 @@ name = "embassy-traits"
 version = "0.1.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=c8f3ec3fba47899b123d0a146e8f9b3808ea4601#c8f3ec3fba47899b123d0a146e8f9b3808ea4601"
 dependencies = [
+ "defmt",
  "embedded-hal",
 ]
 

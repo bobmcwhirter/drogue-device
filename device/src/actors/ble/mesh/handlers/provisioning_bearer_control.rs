@@ -1,9 +1,10 @@
 use core::marker::PhantomData;
 
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
 
 use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::drivers::ble::mesh::generic_provisioning::ProvisioningBearerControl;
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 use crate::drivers::ble::mesh::transport::Transport;
 
 enum State {
@@ -11,21 +12,23 @@ enum State {
     LinkOpen,
 }
 
-pub struct ProvisioningBearerControlHander<T, R>
+pub struct ProvisioningBearerControlHander<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     state: State,
     pub(crate) link_id: Option<u32>,
     transaction_number: u8,
-    _marker: PhantomData<(T, R)>,
+    _marker: PhantomData<(T, R, S)>,
 }
 
-impl<T, R> ProvisioningBearerControlHander<T, R>
+impl<T, R, S> ProvisioningBearerControlHander<T, R, S>
 where
     T: Transport + 'static,
-    R: RngCore,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -38,7 +41,7 @@ where
 
     pub(crate) async fn handle(
         &mut self,
-        device: &Device<T, R>,
+        device: &Device<T, R, S>,
         link_id: u32,
         pbc: &ProvisioningBearerControl,
     ) -> Result<(), DeviceError> {

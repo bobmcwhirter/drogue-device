@@ -1,10 +1,12 @@
 use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::key_storage::{KeyStorage, Keys};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::drivers::ble::mesh::{MESH_BEACON, PB_ADV};
 use core::future::Future;
 use core::mem;
-use core::ptr::slice_from_raw_parts;
 use core::num::NonZeroU32;
+use core::ptr::slice_from_raw_parts;
+use embassy::traits::flash::Flash;
 use heapless::Vec;
 use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
@@ -52,25 +54,30 @@ impl Nrf52BleMeshTransport {
     }
 
     pub fn rng(&self) -> SoftdeviceRng {
-        SoftdeviceRng {
-            sd: self.sd
+        SoftdeviceRng { sd: self.sd }
+    }
+
+    pub fn key_storage(&self, address: usize) -> SoftdeviceKeyStorage {
+        SoftdeviceKeyStorage {
+            address,
+            flash: nrf_softdevice::Flash::take(self.sd),
         }
     }
 }
 
 pub struct SoftdeviceRng {
-    sd: &'static Softdevice
+    sd: &'static Softdevice,
 }
 
 impl RngCore for SoftdeviceRng {
     fn next_u32(&mut self) -> u32 {
-        let mut bytes = [0;4];
+        let mut bytes = [0; 4];
         self.fill_bytes(&mut bytes);
         u32::from_be_bytes(bytes)
     }
 
     fn next_u64(&mut self) -> u64 {
-        let mut bytes = [0;8];
+        let mut bytes = [0; 8];
         self.fill_bytes(&mut bytes);
         u64::from_be_bytes(bytes)
     }
@@ -78,9 +85,7 @@ impl RngCore for SoftdeviceRng {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         loop {
             match self.try_fill_bytes(dest) {
-                Ok(_) => {
-                    return
-                },
+                Ok(_) => return,
                 Err(_) => {
                     // loop again
                 }
@@ -89,12 +94,49 @@ impl RngCore for SoftdeviceRng {
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
-        random_bytes(self.sd, dest).map_err(|_| unsafe{ NonZeroU32::new_unchecked(99) }.into())
+        random_bytes(self.sd, dest).map_err(|_| unsafe { NonZeroU32::new_unchecked(99) }.into())
     }
 }
 
-impl CryptoRng for SoftdeviceRng {
+impl CryptoRng for SoftdeviceRng {}
 
+pub struct SoftdeviceKeyStorage {
+    address: usize,
+    flash: nrf_softdevice::Flash,
+}
+
+impl KeyStorage for SoftdeviceKeyStorage {
+    type StoreFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<(), ()>>;
+
+    fn store<'m>(&'m mut self, keys: &'m Keys) -> Self::StoreFuture<'m> {
+        async move {
+            defmt::info!("store 1 @ {:x}", self.address);
+            self.flash.erase(self.address).await.map_err(|_|())?;
+            defmt::info!("store 2");
+            let result = self.flash.write(self.address, &keys.payload).await;
+            defmt::info!("store 3 {}", result);
+            Ok(())
+        }
+    }
+
+    type RetrieveFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<Option<Keys>, ()>>;
+
+    fn retrieve<'m>(&'m mut self) -> Self::RetrieveFuture<'m> {
+        async move {
+            defmt::info!("retrieve 1");
+            let mut payload = [0; 512];
+            defmt::info!("retrieve 2");
+            self.flash.read(self.address, &mut payload).await.map_err(|_|())?;
+            defmt::info!("retrieve 3");
+            Ok(Some(Keys { payload }))
+        }
+    }
 }
 
 impl Transport for Nrf52BleMeshTransport {
@@ -138,7 +180,8 @@ impl Transport for Nrf52BleMeshTransport {
                     ..Default::default()
                 },
             )
-            .await.ok();
+            .await
+            .ok();
         }
     }
 
@@ -159,7 +202,8 @@ impl Transport for Nrf52BleMeshTransport {
                     ..Default::default()
                 },
             )
-            .await.ok();
+            .await
+            .ok();
         }
     }
 
@@ -185,7 +229,8 @@ impl Transport for Nrf52BleMeshTransport {
                     }
                     None
                 })
-                .await.ok();
+                .await
+                .ok();
             }
         }
     }

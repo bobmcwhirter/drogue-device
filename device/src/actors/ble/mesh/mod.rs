@@ -5,25 +5,28 @@ use crate::drivers::ble::mesh::transport::Transport;
 use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
 use core::future::Future;
 use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
 pub mod bearer;
 pub mod device;
 mod handlers;
 mod key_manager;
 
-pub struct BleMesh<T, R>
+pub struct BleMesh<T, R, S>
 where
     T: Transport + 'static,
     R: CryptoRng + RngCore + 'static,
+    S: KeyStorage + 'static,
 {
-    bearer: BleMeshBearer<T, R>,
+    bearer: BleMeshBearer<T, R, S>,
     _noop: ActorContext<NoOp>,
 }
 
-impl<T, R> BleMesh<T, R>
+impl<T, R, S> BleMesh<T, R, S>
 where
     T: Transport + 'static,
     R: CryptoRng + RngCore + 'static,
+    S: KeyStorage + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
@@ -33,18 +36,19 @@ where
     }
 }
 
-impl<T, R> Package for BleMesh<T, R>
+impl<T, R, S> Package for BleMesh<T, R, S>
 where
     T: Transport + 'static,
     R: CryptoRng + RngCore + 'static,
+    S: KeyStorage + 'static,
 {
     type Primary = NoOp;
-    type Configuration = (R, Uuid, Capabilities);
+    type Configuration = (R, S, Uuid, Capabilities);
 
-    fn mount<S: ActorSpawner>(
+    fn mount<AS: ActorSpawner>(
         &'static self,
         config: Self::Configuration,
-        spawner: S,
+        spawner: AS,
     ) -> Address<Self::Primary> {
         let _ = self.bearer.mount(config, spawner);
         self._noop.mount(spawner, NoOp {})

@@ -23,7 +23,8 @@ use futures::future::{select, Either};
 use futures::{pin_mut, StreamExt};
 use heapless::Vec;
 use p256::PublicKey;
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
 enum State {
     Unprovisioned,
@@ -33,6 +34,7 @@ enum State {
 
 #[derive(Format)]
 pub enum DeviceError {
+    KeyInitializationError,
     InvalidPacket,
     InsufficientBuffer,
     InvalidLink,
@@ -62,10 +64,11 @@ impl From<ParseError> for DeviceError {
     }
 }
 
-pub struct Device<T, R>
-    where
-        T: Transport + 'static,
-        R: RngCore + 'static,
+pub struct Device<T, R, S>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     pub(crate) uuid: Uuid,
     pub(crate) capabilities: Capabilities,
@@ -75,22 +78,24 @@ pub struct Device<T, R>
     ticker: Ticker,
     // Crypto
     rng: RefCell<R>,
-    pub(crate) key_manager: KeyManager,
+    pub(crate) key_manager: KeyManager<S>,
     // Transport
     outbound: RefCell<Option<ProvisioningPDU>>,
     // Handlers
-    provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T, R>>,
-    transaction: RefCell<TransactionHandler<T, R>>,
-    provisioning: RefCell<ProvisioningHandler<T, R>>,
+    provisioning_bearer_control: RefCell<ProvisioningBearerControlHander<T, R, S>>,
+    transaction: RefCell<TransactionHandler<T, R, S>>,
+    provisioning: RefCell<ProvisioningHandler<T, R, S>>,
 }
 
-impl<T, R> Device<T, R>
-    where
-        T: Transport + 'static,
-        R: RngCore + 'static,
+impl<T, R, S> Device<T, R, S>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
-    pub fn new(mut rng: R, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
-        let key_manager = KeyManager::new(&mut rng);
+    pub fn new(mut rng: R, storage: S, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
+        let key_manager = KeyManager::new(storage);
+        let provisioning = ProvisioningHandler::new(&mut rng);
         Self {
             uuid,
             capabilities,
@@ -103,11 +108,15 @@ impl<T, R> Device<T, R>
             outbound: RefCell::new(None),
             provisioning_bearer_control: RefCell::new(ProvisioningBearerControlHander::new()),
             transaction: RefCell::new(TransactionHandler::new()),
-            provisioning: RefCell::new(ProvisioningHandler::new()),
+            provisioning: RefCell::new(provisioning ),
         }
     }
 
-    pub(crate) fn public_key(&self) -> PublicKey {
+    async fn initialize(&mut self) -> Result<(), DeviceError>{
+       self.key_manager.initialize(&mut *self.rng.borrow_mut()).await
+    }
+
+    pub(crate) fn public_key(&self) -> Result<PublicKey, DeviceError> {
         self.key_manager.public_key()
     }
 
@@ -156,7 +165,7 @@ impl<T, R> Device<T, R>
                 ProvisioningBearerControl::LinkAck,
             ),
         })
-            .await
+        .await
     }
 
     pub(crate) async fn tx_transaction_ack(
@@ -170,7 +179,7 @@ impl<T, R> Device<T, R>
                 transaction_number,
                 pdu: GenericProvisioningPDU::TransactionAck,
             })
-                .await
+            .await
         } else {
             Ok(())
         }
@@ -223,30 +232,19 @@ impl<T, R> Device<T, R>
             GenericProvisioningPDU::TransactionStart(tx_start) => {
                 self.transaction
                     .borrow_mut()
-                    .handle_transaction_start(
-                        self,
-                        pdu.transaction_number,
-                        &tx_start,
-                    )
+                    .handle_transaction_start(self, pdu.transaction_number, &tx_start)
                     .await
             }
-            GenericProvisioningPDU::TransactionContinuation(tx_cont, ) => {
+            GenericProvisioningPDU::TransactionContinuation(tx_cont) => {
                 self.transaction
                     .borrow_mut()
-                    .handle_transaction_continuation(
-                        self,
-                        pdu.transaction_number,
-                        &tx_cont,
-                    )
+                    .handle_transaction_continuation(self, pdu.transaction_number, &tx_cont)
                     .await
             }
             GenericProvisioningPDU::TransactionAck => {
                 self.transaction
                     .borrow_mut()
-                    .handle_transaction_ack(
-                        self,
-                        pdu.transaction_number,
-                    )
+                    .handle_transaction_ack(self, pdu.transaction_number)
                     .await
             }
             GenericProvisioningPDU::ProvisioningBearerControl(pbc) => {
@@ -264,36 +262,42 @@ impl<T, R> Device<T, R>
     }
 }
 
-impl<T, R> Handler for Address<Device<T, R>>
-    where
-        T: Transport + 'static,
-        R: RngCore + 'static,
+impl<T, R, S> Handler for Address<Device<T, R, S>>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     fn handle<'m>(&self, message: Vec<u8, 384>) {
         self.notify(message).ok();
     }
 }
 
-impl<T, R> Actor for Device<T, R>
-    where
-        T: Transport + 'static,
-        R: RngCore + 'static,
+impl<T, R, S> Actor for Device<T, R, S>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: KeyStorage + 'static,
 {
     type Message<'m> = Vec<u8, 384>;
     type OnMountFuture<'m, M>
-        where
-            M: 'm,
-    = impl Future<Output=()> + 'm;
+    where
+        M: 'm,
+    = impl Future<Output = ()> + 'm;
 
     fn on_mount<'m, M>(
         &'m mut self,
         _: Address<Self>,
         inbox: &'m mut M,
     ) -> Self::OnMountFuture<'m, M>
-        where
-            M: Inbox<Self> + 'm,
+    where
+        M: Inbox<Self> + 'm,
     {
         async move {
+            if let Err(e) = self.initialize().await {
+                defmt::error!("Unable to initialize BLE-Mesh stack. Stuff isn't going to work.")
+            }
+
             loop {
                 let inbox_fut = inbox.next();
                 let ticker_fut = self.ticker.next();
