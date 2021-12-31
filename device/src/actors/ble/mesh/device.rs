@@ -1,6 +1,7 @@
 use super::handlers::ProvisioningBearerControlHander;
 use super::handlers::TransactionHandler;
 use crate::actors::ble::mesh::bearer::{Tx, TxMessage};
+use crate::actors::ble::mesh::configuration_manager::{ConfigurationManager, KeyStorage, Keys};
 use crate::actors::ble::mesh::handlers::ProvisioningHandler;
 use crate::actors::ble::mesh::key_manager::KeyManager;
 use crate::drivers::ble::mesh::bearer::advertising;
@@ -10,11 +11,13 @@ use crate::drivers::ble::mesh::generic_provisioning::{
     GenericProvisioningPDU, ProvisioningBearerControl,
 };
 use crate::drivers::ble::mesh::provisioning::{Capabilities, ParseError, ProvisioningPDU};
+use crate::drivers::ble::mesh::storage::Storage;
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::drivers::ble::mesh::{InsufficientBuffer, PB_ADV};
 use crate::{Actor, Address, Inbox};
 use cmac::crypto_mac::InvalidKeyLength;
 use core::cell::RefCell;
+use core::cell::RefMut;
 use core::future::Future;
 use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::Format;
@@ -24,7 +27,6 @@ use futures::{pin_mut, StreamExt};
 use heapless::Vec;
 use p256::PublicKey;
 use rand_core::{CryptoRng, RngCore};
-use crate::drivers::ble::mesh::key_storage::KeyStorage;
 
 enum State {
     Unprovisioned,
@@ -34,6 +36,7 @@ enum State {
 
 #[derive(Format)]
 pub enum DeviceError {
+    NoServices,
     KeyInitializationError,
     InvalidPacket,
     InsufficientBuffer,
@@ -68,7 +71,7 @@ pub struct Device<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     pub(crate) uuid: Uuid,
     pub(crate) capabilities: Capabilities,
@@ -78,7 +81,8 @@ where
     ticker: Ticker,
     // Crypto
     rng: RefCell<R>,
-    pub(crate) key_manager: KeyManager<S>,
+    config_manager: ConfigurationManager<S>,
+    pub(crate) key_manager: RefCell<KeyManager<R, Device<T, R, S>>>,
     // Transport
     outbound: RefCell<Option<ProvisioningPDU>>,
     // Handlers
@@ -91,10 +95,16 @@ impl<T, R, S> Device<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
-    pub fn new(mut rng: R, storage: S, uuid: Uuid, capabilities: Capabilities, tx: Address<Tx<T>>) -> Self {
-        let key_manager = KeyManager::new(storage);
+    pub fn new(
+        mut rng: R,
+        storage: S,
+        uuid: Uuid,
+        capabilities: Capabilities,
+        tx: Address<Tx<T>>,
+    ) -> Self {
+        let key_manager = KeyManager::new();
         let provisioning = ProvisioningHandler::new(&mut rng);
         Self {
             uuid,
@@ -103,21 +113,24 @@ where
             state: State::Unprovisioned,
             tx,
             ticker: Ticker::every(Duration::from_secs(3)),
-            key_manager,
+            config_manager: ConfigurationManager::new(storage),
+            key_manager: RefCell::new(key_manager),
             rng: RefCell::new(rng),
             outbound: RefCell::new(None),
             provisioning_bearer_control: RefCell::new(ProvisioningBearerControlHander::new()),
             transaction: RefCell::new(TransactionHandler::new()),
-            provisioning: RefCell::new(provisioning ),
+            provisioning: RefCell::new(provisioning),
         }
     }
 
-    async fn initialize(&mut self) -> Result<(), DeviceError>{
-       self.key_manager.initialize(&mut *self.rng.borrow_mut()).await
+    async fn initialize(&mut self) -> Result<(), DeviceError> {
+        self.config_manager.initialize().await;
+        self.key_manager.borrow_mut().initialize(self as *const _).await
+        //self.key_manager.initialize(&mut *self.rng.borrow_mut()).await
     }
 
     pub(crate) fn public_key(&self) -> Result<PublicKey, DeviceError> {
-        self.key_manager.public_key()
+        self.key_manager.borrow().public_key()
     }
 
     pub(crate) fn next_transaction(&self) -> u8 {
@@ -266,7 +279,7 @@ impl<T, R, S> Handler for Address<Device<T, R, S>>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     fn handle<'m>(&self, message: Vec<u8, 384>) {
         self.notify(message).ok();
@@ -277,7 +290,7 @@ impl<T, R, S> Actor for Device<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     type Message<'m> = Vec<u8, 384>;
     type OnMountFuture<'m, M>
@@ -346,5 +359,40 @@ where
                 }
             }
         }
+    }
+}
+
+impl<T, R, S> KeyStorage for Device<T, R, S>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: Storage + 'static,
+{
+    type StoreFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<(), ()>>;
+
+    fn store<'m>(&'m self, keys: Keys) -> Self::StoreFuture<'m> {
+        self.config_manager.store(keys)
+    }
+
+    fn retrieve<'m>(&'m self) -> Keys {
+        self.config_manager.retrieve()
+    }
+}
+
+pub trait RandomProvider<R: RngCore + CryptoRng> {
+    fn rng(&self) -> RefMut<'_, R>;
+}
+
+impl<T, R, S> RandomProvider<R> for Device<T, R, S>
+where
+    T: Transport + 'static,
+    R: RngCore + CryptoRng + 'static,
+    S: Storage + 'static,
+{
+    fn rng(&self) -> RefMut<'_, R> {
+        self.rng.borrow_mut()
     }
 }

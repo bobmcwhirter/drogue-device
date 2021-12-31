@@ -7,13 +7,13 @@ use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 use core::marker::PhantomData;
 use rand_core::{CryptoRng, RngCore};
-use crate::drivers::ble::mesh::key_storage::KeyStorage;
+use crate::drivers::ble::mesh::storage::Storage;
 
 pub struct BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     transport: T,
     start: ActorContext<Start<T>>,
@@ -26,7 +26,7 @@ impl<T, R, S> BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
@@ -43,7 +43,7 @@ impl<T, R, S> Package for BleMeshBearer<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     type Primary = Tx<T>;
     type Configuration = (R, S, Uuid, Capabilities);
@@ -101,7 +101,7 @@ struct Rx<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     transport: &'static T,
     handler: Address<Device<T,R, S>>,
@@ -111,7 +111,7 @@ impl<T, R, S> Actor for Rx<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     type OnMountFuture<'m, M>
     where

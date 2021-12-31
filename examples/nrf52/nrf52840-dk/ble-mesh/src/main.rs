@@ -8,7 +8,7 @@
 use defmt_rtt as _;
 use drogue_device::{ActorContext, actors, DeviceContext, drivers, Package};
 use drogue_device::actors::ble::mesh::BleMesh;
-use drogue_device::drivers::ble::mesh::controller::nrf52::{Nrf52BleMeshTransport, SoftdeviceKeyStorage, SoftdeviceRng};
+use drogue_device::drivers::ble::mesh::controller::nrf52::{Nrf52BleMeshTransport, SoftdeviceStorage, SoftdeviceRng};
 use drogue_device::drivers::ble::mesh::device::Uuid;
 use drogue_device::drivers::ble::mesh::provisioning::{
     Algorithms, Capabilities, InputOOBActions, OOBSize, OutputOOBActions, PublicKeyType,
@@ -28,7 +28,7 @@ use panic_probe as _;
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
-    mesh: BleMesh<Nrf52BleMeshTransport, SoftdeviceRng, SoftdeviceKeyStorage>,
+    mesh: BleMesh<Nrf52BleMeshTransport, SoftdeviceRng, SoftdeviceStorage>,
 }
 
 static DEVICE: DeviceContext<MyDevice> = DeviceContext::new();
@@ -46,14 +46,14 @@ const NODE_UUID: Uuid = Uuid([
 ]);
 
 extern "C" {
-    static __key_storage: u8;
+    static __storage: u8;
 }
 
 #[embassy::main(config = "config()")]
 async fn main(spawner: Spawner, p: Peripherals) {
     let transport = Nrf52BleMeshTransport::new();
     let rng = transport.rng();
-    let storage = transport.key_storage(unsafe { &__key_storage as *const u8 as usize } );
+    let storage = transport.storage(unsafe { &__storage as *const u8 as usize } );
 
     let device = DEVICE.configure(MyDevice {
         led: ActorContext::new(),

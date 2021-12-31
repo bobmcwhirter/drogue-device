@@ -4,7 +4,7 @@ use rand_core::{CryptoRng, RngCore};
 
 use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::drivers::ble::mesh::generic_provisioning::ProvisioningBearerControl;
-use crate::drivers::ble::mesh::key_storage::KeyStorage;
+use crate::drivers::ble::mesh::storage::Storage;
 use crate::drivers::ble::mesh::transport::Transport;
 
 enum State {
@@ -16,7 +16,7 @@ pub struct ProvisioningBearerControlHander<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     state: State,
     pub(crate) link_id: Option<u32>,
@@ -28,7 +28,7 @@ impl<T, R, S> ProvisioningBearerControlHander<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     pub(crate) fn new() -> Self {
         Self {

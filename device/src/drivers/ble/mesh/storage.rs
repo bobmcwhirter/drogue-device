@@ -31,18 +31,19 @@ impl Keys {
  */
 
 #[repr(align(4))]
-pub struct Keys {
+pub struct Payload {
     pub payload: [u8; 512],
 }
 
-pub trait KeyStorage {
+
+pub trait Storage {
     type StoreFuture<'m>: Future<Output = Result<(), ()>>
     where
         Self: 'm;
 
-    fn store<'m>(&'m mut self, keys: &'m Keys) -> Self::StoreFuture<'m>;
+    fn store<'m>(&'m mut self, payload: &'m Payload) -> Self::StoreFuture<'m>;
 
-    type RetrieveFuture<'m>: Future<Output = Result<Option<Keys>, ()>>
+    type RetrieveFuture<'m>: Future<Output = Result<Option<Payload>, ()>>
     where
         Self: 'm;
 

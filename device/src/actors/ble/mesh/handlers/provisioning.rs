@@ -11,7 +11,7 @@ use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
 use rand_core::{CryptoRng, RngCore};
 use crate::drivers::ble::mesh::InsufficientBuffer;
-use crate::drivers::ble::mesh::key_storage::KeyStorage;
+use crate::drivers::ble::mesh::storage::Storage;
 
 pub enum AuthValue {
     None,
@@ -55,7 +55,7 @@ pub struct ProvisioningHandler<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     transcript: Transcript,
     auth_value: Option<AuthValue>,
@@ -68,7 +68,7 @@ impl<T, R, S> ProvisioningHandler<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     pub(crate) fn new(rng: &mut R) -> Self {
         let mut random_device = [0;16];
@@ -121,7 +121,7 @@ where
                     ))
                     .unwrap();
 
-                device.key_manager.set_peer_public_key(peer_pk);
+                device.key_manager.borrow_mut().set_peer_public_key(peer_pk).await;
                 let pk = device.public_key()?;
                 let xy = pk.to_encoded_point(false);
                 let x = xy.x().unwrap();
@@ -163,8 +163,8 @@ where
                 provisioning_salt[32..48].copy_from_slice( &self.random_device );
                 let provisioning_salt = &s1( &provisioning_salt )?.into_bytes()[0..];
 
-                let session_key = &device.key_manager.k1( &provisioning_salt, b"prsk")?.into_bytes()[0..];
-                let session_nonce = &device.key_manager.k1( &provisioning_salt, b"prsn")?.into_bytes()[3..];
+                let session_key = &device.key_manager.borrow().k1( &provisioning_salt, b"prsk")?.into_bytes()[0..];
+                let session_nonce = &device.key_manager.borrow().k1( &provisioning_salt, b"prsn")?.into_bytes()[3..];
 
                 defmt::trace!("** session_key {:x}", session_key);
                 defmt::trace!("** session_nonce {:x}", session_nonce);
@@ -174,7 +174,7 @@ where
                     Ok(_) => {
                         let provisioning_data = ProvisioningData::parse(&data.encrypted)?;
                         defmt::debug!("** provisioning_data {}", provisioning_data);
-                        device.key_manager.set_provisioning_data(&provisioning_data);
+                        device.key_manager.borrow_mut().set_provisioning_data(&provisioning_data);
                     }
                     Err(_) => {
                         defmt::info!("decryption error!");
@@ -194,7 +194,7 @@ where
 
     fn confirmation_device(&self, device: &Device<T, R, S>) -> Result<Confirmation, DeviceError> {
         let salt = self.transcript.confirmation_salt()?;
-        let confirmation_key = device.key_manager.k1(&*salt.into_bytes(), b"prck")?;
+        let confirmation_key = device.key_manager.borrow().k1(&*salt.into_bytes(), b"prck")?;
         let mut bytes: Vec<u8, 32> = Vec::new();
         bytes.extend_from_slice(&self.random_device).map_err(|_|DeviceError::InsufficientBuffer)?;
         bytes.extend_from_slice(&self.auth_value.as_ref().ok_or(DeviceError::InsufficientBuffer)?.get_bytes()).map_err(|_|DeviceError::InsufficientBuffer)?;

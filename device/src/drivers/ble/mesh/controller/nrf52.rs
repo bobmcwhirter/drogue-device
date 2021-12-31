@@ -1,5 +1,5 @@
 use crate::drivers::ble::mesh::device::Uuid;
-use crate::drivers::ble::mesh::key_storage::{KeyStorage, Keys};
+use crate::drivers::ble::mesh::storage::{Storage, Payload};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::drivers::ble::mesh::{MESH_BEACON, PB_ADV};
 use core::future::Future;
@@ -57,8 +57,8 @@ impl Nrf52BleMeshTransport {
         SoftdeviceRng { sd: self.sd }
     }
 
-    pub fn key_storage(&self, address: usize) -> SoftdeviceKeyStorage {
-        SoftdeviceKeyStorage {
+    pub fn storage(&self, address: usize) -> SoftdeviceStorage {
+        SoftdeviceStorage {
             address,
             flash: nrf_softdevice::Flash::take(self.sd),
         }
@@ -100,18 +100,18 @@ impl RngCore for SoftdeviceRng {
 
 impl CryptoRng for SoftdeviceRng {}
 
-pub struct SoftdeviceKeyStorage {
+pub struct SoftdeviceStorage {
     address: usize,
     flash: nrf_softdevice::Flash,
 }
 
-impl KeyStorage for SoftdeviceKeyStorage {
+impl Storage for SoftdeviceStorage {
     type StoreFuture<'m>
     where
         Self: 'm,
     = impl Future<Output = Result<(), ()>>;
 
-    fn store<'m>(&'m mut self, keys: &'m Keys) -> Self::StoreFuture<'m> {
+    fn store<'m>(&'m mut self, keys: &'m Payload) -> Self::StoreFuture<'m> {
         async move {
             defmt::info!("store 1 @ {:x}", self.address);
             self.flash.erase(self.address).await.map_err(|_|())?;
@@ -125,7 +125,7 @@ impl KeyStorage for SoftdeviceKeyStorage {
     type RetrieveFuture<'m>
     where
         Self: 'm,
-    = impl Future<Output = Result<Option<Keys>, ()>>;
+    = impl Future<Output = Result<Option<Payload>, ()>>;
 
     fn retrieve<'m>(&'m mut self) -> Self::RetrieveFuture<'m> {
         async move {
@@ -134,7 +134,7 @@ impl KeyStorage for SoftdeviceKeyStorage {
             defmt::info!("retrieve 2");
             self.flash.read(self.address, &mut payload).await.map_err(|_|())?;
             defmt::info!("retrieve 3");
-            Ok(Some(Keys { payload }))
+            Ok(Some(Payload { payload }))
         }
     }
 }

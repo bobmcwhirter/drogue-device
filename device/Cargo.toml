@@ -65,6 +65,8 @@ p256 = { version = "0.10.0", default-features = false, optional=true }
 cmac = { version = "0.6.0", default-features = false, optional=true }
 aes = { version = "0.7", default-features = false, optional = true }
 ccm = { version = "0.4.4", default-features = false, optional = true }
+serde = { version = "1.0", default-features = false, optional = true}
+postcard = { version = "0.7.2", optional=true }
 
 [dev-dependencies]
 embassy = { version = "0.1.0", features = ["std", "time", "time-tick-1mhz"]}
@@ -98,6 +100,8 @@ tls = ["drogue-tls"]
     "aes",
     "ccm",
     "ccm/heapless",
+    "serde",
+    "postcard"
 ]
 
 "bsp+b_u585i_iot02a" = [ "embassy-stm32" ]

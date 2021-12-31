@@ -15,6 +15,6 @@ pub mod provisioning;
 pub mod status;
 pub mod transport;
 pub mod crypto;
-pub mod key_storage;
+pub mod storage;
 
 pub struct InsufficientBuffer;

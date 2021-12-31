@@ -12,13 +12,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::Format;
 use heapless::Vec;
 use rand_core::{CryptoRng, RngCore};
-use crate::drivers::ble::mesh::key_storage::KeyStorage;
+use crate::drivers::ble::mesh::storage::Storage;
 
 pub struct TransactionHandler<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     inbound_segments: RefCell<Option<InboundSegments>>,
     inbound_acks: RefCell<Option<u8>>,
@@ -30,7 +30,7 @@ impl<T, R, S> TransactionHandler<T, R, S>
 where
     T: Transport + 'static,
     R: RngCore + CryptoRng + 'static,
-    S: KeyStorage + 'static,
+    S: Storage + 'static,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -303,7 +303,7 @@ impl OutboundSegments {
     where
         T: Transport + 'static,
         R: RngCore + CryptoRng + 'static,
-        S: KeyStorage + 'static,
+        S: Storage + 'static,
     {
         if self.first.swap(false, Ordering::SeqCst) {
             defmt::trace!("<< Transaction({})", self.transaction_number);
