@@ -82,6 +82,12 @@ where
         }
     }
 
+    pub(crate) fn reset(&mut self) {
+        self.transcript.reset();
+        self.random_provisioner.take();
+        self.auth_value.take();
+    }
+
     pub(crate) async fn handle(
         &mut self,
         device: &Device<T, R, S>,

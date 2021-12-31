@@ -1,7 +1,7 @@
 use crate::drivers::ble::mesh::device::Uuid;
-use crate::drivers::ble::mesh::storage::{Storage, Payload};
+use crate::drivers::ble::mesh::storage::{Payload, Storage};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
-use crate::drivers::ble::mesh::{MESH_BEACON, PB_ADV};
+use crate::drivers::ble::mesh::{MESH_BEACON, MESH_MESSAGE, PB_ADV};
 use core::future::Future;
 use core::mem;
 use core::num::NonZeroU32;
@@ -114,7 +114,7 @@ impl Storage for SoftdeviceStorage {
     fn store<'m>(&'m mut self, keys: &'m Payload) -> Self::StoreFuture<'m> {
         async move {
             defmt::info!("store 1 @ {:x}", self.address);
-            self.flash.erase(self.address).await.map_err(|_|())?;
+            self.flash.erase(self.address).await.map_err(|_| ())?;
             defmt::info!("store 2");
             let result = self.flash.write(self.address, &keys.payload).await;
             defmt::info!("store 3 {}", result);
@@ -132,7 +132,10 @@ impl Storage for SoftdeviceStorage {
             defmt::info!("retrieve 1");
             let mut payload = [0; 512];
             defmt::info!("retrieve 2");
-            self.flash.read(self.address, &mut payload).await.map_err(|_|())?;
+            self.flash
+                .read(self.address, &mut payload)
+                .await
+                .map_err(|_| ())?;
             defmt::info!("retrieve 3");
             Ok(Some(Payload { payload }))
         }
@@ -224,7 +227,7 @@ impl Transport for Nrf52BleMeshTransport {
                 central::scan::<_, ()>(self.sd, &config, |event| {
                     let data = event.data;
                     let data = unsafe { &*slice_from_raw_parts(data.p_data, data.len as usize) };
-                    if data.len() >= 2 && data[1] == PB_ADV {
+                    if data.len() >= 2 && (data[1] == PB_ADV || data[1] == MESH_MESSAGE) {
                         handler.handle(Vec::from_slice(data).unwrap());
                     }
                     None

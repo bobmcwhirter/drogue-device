@@ -1,6 +1,6 @@
 use crate::actors::ble::mesh::configuration_manager::{KeyStorage, Keys, Network};
 use crate::actors::ble::mesh::device::{DeviceError, RandomProvider};
-use crate::drivers::ble::mesh::crypto::k1;
+use crate::drivers::ble::mesh::crypto::{k1, k2};
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
 use crate::drivers::ble::mesh::storage::{Payload, Storage};
 use crate::drivers::ble::mesh::transport::Transport;
@@ -113,7 +113,21 @@ where
     ) -> Result<(), DeviceError> {
         defmt::info!("******************************** SET PROVISIONING DATA");
         self.update_stored( |_manager, keys| {
-            keys.set_network(&Network::from(data));
+
+            let (nid, encryption_key, privacy_key) = k2(&data.network_key, &[0x00]).map_err(|_|DeviceError::KeyInitialization)?;
+
+            let update = Network {
+                network_key: data.network_key,
+                key_index: data.key_index,
+                key_refresh_flag: data.key_refresh_flag,
+                iv_update_flag: data.iv_update_flag,
+                iv_index: data.iv_index,
+                unicast_address: data.unicast_address,
+                nid,
+                encryption_key,
+                privacy_key,
+            };
+            keys.set_network(&update);
             Ok(())
         }).await
     }

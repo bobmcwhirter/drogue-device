@@ -17,6 +17,10 @@ impl Transcript {
         Self { confirmation_inputs: Vec::new() }
     }
 
+    pub(crate) fn reset(&mut self) {
+        self.confirmation_inputs.truncate(0);
+    }
+
     pub(crate) fn add_invite(&mut self, invite: &Invite) -> Result<(), InsufficientBuffer> {
         let mut vec: Vec<u8, 2> = Vec::new();
         invite.emit(&mut vec)?;

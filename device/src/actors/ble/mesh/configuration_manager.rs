@@ -31,25 +31,16 @@ pub struct Keys {
 
 #[derive(Serialize, Deserialize, Copy, Clone, Default, Format)]
 pub struct Network {
-    network_key: [u8; 16],
-    key_index: u16,
-    key_refresh_flag: KeyRefreshFlag,
-    iv_update_flag: IVUpdateFlag,
-    iv_index: u32,
-    unicast_address: u16
-}
-
-impl From<&ProvisioningData> for Network {
-    fn from(data: &ProvisioningData) -> Self {
-        Self {
-            network_key: data.network_key,
-            key_index: data.key_index,
-            key_refresh_flag: data.key_refresh_flag,
-            iv_update_flag: data.iv_update_flag,
-            iv_index: data.iv_index,
-            unicast_address: data.unicast_address,
-        }
-    }
+    pub(crate) network_key: [u8; 16],
+    pub(crate) key_index: u16,
+    pub(crate) key_refresh_flag: KeyRefreshFlag,
+    pub(crate) iv_update_flag: IVUpdateFlag,
+    pub(crate) iv_index: u32,
+    pub(crate) unicast_address: u16,
+    // derived attributes
+    pub(crate) nid: u8,
+    pub(crate) encryption_key: [u8; 16],
+    pub(crate) privacy_key: [u8; 16],
 }
 
 impl Keys {

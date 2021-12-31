@@ -13,7 +13,7 @@ use crate::drivers::ble::mesh::generic_provisioning::{
 use crate::drivers::ble::mesh::provisioning::{Capabilities, ParseError, ProvisioningPDU};
 use crate::drivers::ble::mesh::storage::Storage;
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
-use crate::drivers::ble::mesh::{InsufficientBuffer, PB_ADV};
+use crate::drivers::ble::mesh::{InsufficientBuffer, MESH_MESSAGE, PB_ADV};
 use crate::{Actor, Address, Inbox};
 use cmac::crypto_mac::InvalidKeyLength;
 use core::cell::RefCell;
@@ -126,10 +126,16 @@ where
 
     async fn initialize(&mut self) -> Result<(), DeviceError> {
         defmt::trace!("** initializing config_manager");
-        self.config_manager.initialize().await.map_err(|_|DeviceError::StorageInitialization)?;
+        self.config_manager
+            .initialize()
+            .await
+            .map_err(|_| DeviceError::StorageInitialization)?;
         defmt::trace!("   complete");
         defmt::trace!("** initializing key_manager");
-        self.key_manager.borrow_mut().initialize(self as *const _).await?;
+        self.key_manager
+            .borrow_mut()
+            .initialize(self as *const _)
+            .await?;
         defmt::trace!("   complete");
         Ok(())
     }
@@ -277,6 +283,7 @@ where
 
     pub(crate) fn link_close(&self) {
         self.transaction.borrow_mut().link_close();
+        self.provisioning.borrow_mut().reset();
     }
 }
 
@@ -327,16 +334,24 @@ where
                     Either::Left((ref mut msg, _)) => match msg {
                         Some(message) => {
                             let data = message.message();
-                            if data.len() >= 2 && data[1] == PB_ADV {
-                                let pdu = advertising::PDU::parse(data);
-                                if let Ok(pdu) = pdu {
-                                    self.handle_pdu(pdu).await
+                            if data.len() >= 2 {
+                                if data[1] == PB_ADV {
+                                    let pdu = advertising::PDU::parse(data);
+                                    if let Ok(pdu) = pdu {
+                                        self.handle_pdu(pdu).await
+                                    } else {
+                                        Err(DeviceError::InvalidPacket)
+                                    }
+                                } else if data[1] == MESH_MESSAGE {
+                                    defmt::info!("saw mesh message {:x}", data);
+                                    Ok(())
                                 } else {
-                                    Err(DeviceError::InvalidPacket)
+                                    defmt::info!("saw unknown message {:x}", data);
+                                    Ok(())
                                 }
                             } else {
-                                // Not a PB-ADV
-                                Ok(())
+                                // Not long enough to bother with.
+                                Err(DeviceError::InvalidPacket)
                             }
                         }
                         _ => {
