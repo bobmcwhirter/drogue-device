@@ -37,7 +37,8 @@ enum State {
 #[derive(Format)]
 pub enum DeviceError {
     NoServices,
-    KeyInitializationError,
+    StorageInitialization,
+    KeyInitialization,
     InvalidPacket,
     InsufficientBuffer,
     InvalidLink,
@@ -124,9 +125,13 @@ where
     }
 
     async fn initialize(&mut self) -> Result<(), DeviceError> {
-        self.config_manager.initialize().await;
-        self.key_manager.borrow_mut().initialize(self as *const _).await
-        //self.key_manager.initialize(&mut *self.rng.borrow_mut()).await
+        defmt::trace!("** initializing config_manager");
+        self.config_manager.initialize().await.map_err(|_|DeviceError::StorageInitialization)?;
+        defmt::trace!("   complete");
+        defmt::trace!("** initializing key_manager");
+        self.key_manager.borrow_mut().initialize(self as *const _).await?;
+        defmt::trace!("   complete");
+        Ok(())
     }
 
     pub(crate) fn public_key(&self) -> Result<PublicKey, DeviceError> {

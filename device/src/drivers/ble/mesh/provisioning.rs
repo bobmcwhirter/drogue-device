@@ -1,6 +1,7 @@
 use core::convert::TryInto;
 use defmt::{Format, Formatter};
 use heapless::Vec;
+use serde::{Deserialize, Serialize};
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
 #[derive(Format)]
@@ -258,12 +259,12 @@ impl Data {
 
 /// The decrypted provisioning data wrapped in `Data` above.
 pub struct ProvisioningData {
-    network_key: [u8;16],
-    key_index: u16,
-    key_refresh_flag: KeyRefreshFlag,
-    iv_update_flag: IVUpdateFlag,
-    iv_index: u32,
-    unicast_address: u16,
+    pub network_key: [u8;16],
+    pub key_index: u16,
+    pub key_refresh_flag: KeyRefreshFlag,
+    pub iv_update_flag: IVUpdateFlag,
+    pub iv_index: u32,
+    pub unicast_address: u16,
 }
 
 impl ProvisioningData {
@@ -290,7 +291,7 @@ impl ProvisioningData {
 }
 
 // TODO: probably move this elsewhere
-#[derive(Format)]
+#[derive(Copy, Clone, Format, Serialize, Deserialize)]
 pub enum KeyRefreshFlag {
     Phase0,
     Phase2,
@@ -306,8 +307,14 @@ impl KeyRefreshFlag {
     }
 }
 
+impl Default for KeyRefreshFlag {
+    fn default() -> Self {
+        Self::Phase0
+    }
+}
+
 // TODO: probably move this elsewhere
-#[derive(Format)]
+#[derive(Copy, Clone, Format, Serialize, Deserialize)]
 pub enum IVUpdateFlag {
     NormalOperation,
     UpdateActive,
@@ -321,6 +328,12 @@ impl IVUpdateFlag {
             Self::UpdateActive
 
         }
+    }
+}
+
+impl Default for IVUpdateFlag {
+    fn default() -> Self {
+        Self::NormalOperation
     }
 }
 

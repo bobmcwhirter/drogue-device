@@ -1,13 +1,19 @@
-use core::convert::TryInto;
-use core::cell::RefCell;
 use crate::drivers::ble::mesh::storage::{Payload, Storage};
+use core::cell::RefCell;
+use core::convert::TryInto;
+use defmt::Format;
 use futures::future::Future;
 use p256::ecdh::SharedSecret;
 use p256::elliptic_curve::sec1::FromEncodedPoint;
 use p256::{AffinePoint, EncodedPoint, SecretKey};
+use p256::elliptic_curve::generic_array::{
+    GenericArray,
+    typenum::consts::U32,
+};
+use p256::elliptic_curve::group::GroupEncoding;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
-use defmt::Format;
+use crate::drivers::ble::mesh::provisioning::{IVUpdateFlag, KeyRefreshFlag, ProvisioningData};
 
 #[derive(Serialize, Deserialize, Copy, Clone, Default, Format)]
 pub struct Configuration {
@@ -20,6 +26,30 @@ pub struct Keys {
     random: Option<[u8; 16]>,
     private_key: Option<[u8; 32]>,
     shared_secret: Option<[u8; 32]>,
+    network: Option<Network>,
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone, Default, Format)]
+pub struct Network {
+    network_key: [u8; 16],
+    key_index: u16,
+    key_refresh_flag: KeyRefreshFlag,
+    iv_update_flag: IVUpdateFlag,
+    iv_index: u32,
+    unicast_address: u16
+}
+
+impl From<&ProvisioningData> for Network {
+    fn from(data: &ProvisioningData) -> Self {
+        Self {
+            network_key: data.network_key,
+            key_index: data.key_index,
+            key_refresh_flag: data.key_refresh_flag,
+            iv_update_flag: data.iv_update_flag,
+            iv_index: data.iv_index,
+            unicast_address: data.unicast_address,
+        }
+    }
 }
 
 impl Keys {
@@ -32,13 +62,19 @@ impl Keys {
         }
     }
 
-    pub(crate) fn set_private_key(&mut self, private_key: &Option<SecretKey>) -> Result<(),()> {
+    pub(crate) fn set_private_key(&mut self, private_key: &Option<SecretKey>) -> Result<(), ()> {
         match private_key {
             None => {
                 self.private_key.take();
-            },
+            }
             Some(private_key) => {
-                self.private_key.replace( private_key.to_nonzero_scalar().to_bytes().try_into().map_err(|_|())? );
+                self.private_key.replace(
+                    private_key
+                        .to_nonzero_scalar()
+                        .to_bytes()
+                        .try_into()
+                        .map_err(|_| ())?,
+                );
             }
         }
         Ok(())
@@ -48,26 +84,35 @@ impl Keys {
         match self.shared_secret {
             None => Ok(None),
             Some(shared_secret) => {
-                let affine = AffinePoint::from_encoded_point(
-                    &EncodedPoint::from_bytes(&shared_secret).map_err(|_| ())?,
-                );
-                if !bool::from(affine.is_some()) {
-                    return Err(());
-                }
-                Ok(Some(SharedSecret::from(&affine.unwrap())))
+                let arr: GenericArray<u8, U32> = shared_secret.into();
+                Ok(Some(SharedSecret::from(arr)))
             }
         }
     }
 
-    pub(crate) fn set_shared_secret(&mut self, shared_secret: &Option<SharedSecret>) -> Result<(),()> {
+    pub(crate) fn set_shared_secret(
+        &mut self,
+        shared_secret: &Option<SharedSecret>,
+    ) -> Result<(), ()> {
         match shared_secret {
             None => {
                 self.shared_secret.take();
             }
             Some(shared_secret) => {
-                self.shared_secret.replace(shared_secret.as_bytes()[0..].try_into().map_err(|_| ())?);
+                let bytes = &shared_secret.as_bytes()[0..];
+                self.shared_secret
+                    .replace(bytes.try_into().map_err(|_| ())?);
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn network(&self) -> Option<Network> {
+        self.network
+    }
+
+    pub(crate) fn set_network(&mut self, network: &Network) -> Result<(),()> {
+        self.network.replace(*network);
         Ok(())
     }
 }
@@ -118,6 +163,7 @@ impl<S: Storage> ConfigurationManager<S> {
             None => Err(()),
             Some(payload) => {
                 self.config = from_bytes(&payload.payload).map_err(|_| ())?;
+                defmt::info!("Load {}", &*self.config.borrow());
                 Ok(())
             }
         }
@@ -128,7 +174,7 @@ impl<S: Storage> ConfigurationManager<S> {
     }
 
     async fn store(&self, config: &Configuration) -> Result<(), ()> {
-        defmt::info!("storing {}", config);
+        defmt::info!("Store {}", config);
         let mut payload = [0; 512];
         to_slice(config, &mut payload);
         let payload = Payload { payload };

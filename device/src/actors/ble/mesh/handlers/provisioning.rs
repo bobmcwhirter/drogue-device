@@ -174,7 +174,7 @@ where
                     Ok(_) => {
                         let provisioning_data = ProvisioningData::parse(&data.encrypted)?;
                         defmt::debug!("** provisioning_data {}", provisioning_data);
-                        device.key_manager.borrow_mut().set_provisioning_data(&provisioning_data);
+                        device.key_manager.borrow_mut().set_provisioning_data(&provisioning_data).await;
                     }
                     Err(_) => {
                         defmt::info!("decryption error!");
