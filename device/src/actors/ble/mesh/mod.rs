@@ -12,6 +12,7 @@ pub mod device;
 mod handlers;
 mod key_manager;
 mod configuration_manager;
+pub(crate) mod pipeline;
 
 pub struct BleMesh<T, R, S>
 where
