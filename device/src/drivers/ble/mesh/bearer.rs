@@ -6,7 +6,7 @@ pub mod advertising {
     use defmt::Format;
     use heapless::Vec;
 
-    #[derive(Format)]
+    #[derive(Format, Clone)]
     pub struct PDU {
         pub link_id: u32,
         pub transaction_number: u8,

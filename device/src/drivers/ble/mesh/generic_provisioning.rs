@@ -3,7 +3,7 @@ use defmt::Format;
 use heapless::Vec;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub enum GenericProvisioningPDU {
     TransactionStart(TransactionStart),
     TransactionAck,
@@ -11,7 +11,7 @@ pub enum GenericProvisioningPDU {
     ProvisioningBearerControl(ProvisioningBearerControl),
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub struct TransactionStart {
     pub seg_n: u8,
     pub total_len: u16,
@@ -46,7 +46,7 @@ impl TransactionStart {
     }
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub struct TransactionContinuation {
     pub segment_index: u8,
     pub data: Vec<u8, 64>,
@@ -132,7 +132,7 @@ impl GenericProvisioningPDU {
     }
 }
 
-#[derive(Format)]
+#[derive(Format, Clone)]
 pub enum ProvisioningBearerControl {
     LinkOpen(Uuid),
     LinkAck,
@@ -190,7 +190,7 @@ impl ProvisioningBearerControl {
     }
 }
 
-#[derive(Format)]
+#[derive(Format, Copy, Clone)]
 pub enum Reason {
     Success = 0x00,
     Timeout = 0x01,

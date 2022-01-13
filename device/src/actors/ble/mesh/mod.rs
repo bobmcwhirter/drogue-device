@@ -7,11 +7,15 @@ use core::future::Future;
 use rand_core::{CryptoRng, RngCore};
 use crate::drivers::ble::mesh::storage::Storage;
 
+pub mod node;
 pub mod bearer;
 pub mod device;
 mod handlers;
 mod key_manager;
 mod configuration_manager;
+pub(crate) mod provisioning_bearer;
+pub(crate) mod transaction;
+mod provisioning;
 
 pub struct BleMesh<T, R, S>
 where
