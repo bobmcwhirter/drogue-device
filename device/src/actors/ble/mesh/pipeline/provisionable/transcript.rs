@@ -5,11 +5,18 @@ use crate::drivers::ble::mesh::provisioning::{
     Capabilities, Invite, PublicKey, Start,
 };
 use heapless::Vec;
+use crate::actors::ble::mesh::pipeline::transaction::Transaction;
 use crate::drivers::ble::mesh::crypto::s1;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
 pub struct Transcript {
     confirmation_inputs: Vec<u8, 256>,
+}
+
+impl Default for Transcript {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Transcript {

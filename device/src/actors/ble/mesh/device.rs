@@ -48,6 +48,7 @@ pub enum DeviceError {
     IncompleteTransaction,
     NoSharedSecret,
     ParseError(ParseError),
+    CryptoError,
 }
 
 impl From<InsufficientBuffer> for DeviceError {

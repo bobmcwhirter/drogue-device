@@ -10,17 +10,25 @@ pub trait ProvisioningBearerContext: MeshContext {
     fn link_id(&mut self) -> &mut Option<u32>;
     fn transaction_number(&mut self) -> &mut Option<u8>;
 
-    type TransmitFuture<'m>: Future<Output = ()>
+    type TransmitFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
         Self: 'm;
 
-    fn transmit_pdu<'m>(&mut self, pdu: PDU) -> Self::TransmitFuture<'m>;
+    fn transmit_pdu<'m>(&'m self, pdu: PDU) -> Self::TransmitFuture<'m>;
 }
 
 pub struct ProvisioningBearer {}
 
+impl Default for ProvisioningBearer {
+    fn default() -> Self {
+        Self {
+
+        }
+    }
+}
+
 impl ProvisioningBearer {
-    pub async fn process<C: ProvisioningBearerContext>(
+    pub async fn process_inbound<C: ProvisioningBearerContext>(
         &mut self,
         ctx: &mut C,
         pdu: PDU,

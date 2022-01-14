@@ -91,7 +91,7 @@ pub fn determine_auth_value<C:ProvisionableContext>(
     )
 }
 
-fn random_physical_oob<C: ProvisionableContext>(ctx: &C, size: u8) -> u32 {
+fn random_physical_oob<C: ProvisionableContext>(ctx: &mut C, size: u8) -> u32 {
     // "select a random integer between 0 and 10 to the power of the Authentication Size exclusive"
     //
     // ... which could be an absolute metric tonne of beeps/twists/pushes if AuthSize is large-ish.
@@ -108,7 +108,7 @@ fn random_physical_oob<C: ProvisionableContext>(ctx: &C, size: u8) -> u32 {
     }
 }
 
-fn random_numeric<C: ProvisionableContext>(ctx: &C, size: u8) -> u32 {
+fn random_numeric<C: ProvisionableContext>(ctx: &mut C, size: u8) -> u32 {
     loop {
         let candidate = ctx.rng_u32();
 
@@ -162,7 +162,7 @@ fn random_numeric<C: ProvisionableContext>(ctx: &C, size: u8) -> u32 {
 }
 
 fn random_alphanumeric<C:ProvisionableContext>(
-    ctx: &C,
+    ctx: &mut C,
     size: u8,
 ) -> Result<Vec<u8, 8>, DeviceError> {
     let mut random = Vec::new();

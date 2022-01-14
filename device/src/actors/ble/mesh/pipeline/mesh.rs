@@ -15,8 +15,14 @@ pub enum MeshData {
     Provisioning(PDU),
 }
 
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
 impl Mesh {
-    pub async fn process<C: MeshContext>(&mut self, ctx: &mut C, data: &[u8]) -> Result<Option<MeshData>, DeviceError> {
+    pub async fn process_inbound<C: MeshContext>(&mut self, ctx: &mut C, data: &[u8]) -> Result<Option<MeshData>, DeviceError> {
         if data.len() >= 2 {
             if data[1] == PB_ADV {
                 Ok(Some(MeshData::Provisioning(PDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?)))
