@@ -6,7 +6,6 @@ use crate::actors::ble::mesh::pipeline::provisionable::auth_value::{
     determine_auth_value, AuthValue,
 };
 use crate::actors::ble::mesh::pipeline::provisionable::transcript::Transcript;
-use crate::actors::ble::mesh::pipeline::transaction::TransactionContext;
 use crate::drivers::ble::mesh::provisioning::{
     Capabilities, Confirmation, ProvisioningData, ProvisioningPDU, PublicKey, Random,
 };
@@ -18,15 +17,16 @@ use core::future::Future;
 use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
+use crate::actors::ble::mesh::pipeline::mesh::MeshContext;
 
-pub trait ProvisionableContext: TransactionContext {
-    fn rng_fill(&mut self, dest: &mut [u8]);
+pub trait ProvisionableContext : MeshContext {
+    fn rng_fill(&self, dest: &mut [u8]);
 
     type SetPeerPublicKeyFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
         Self: 'm;
 
-    fn set_peer_public_key<'m>(&mut self, pk: p256::PublicKey) -> Self::SetPeerPublicKeyFuture<'m>;
+    fn set_peer_public_key<'m>(&self, pk: p256::PublicKey) -> Self::SetPeerPublicKeyFuture<'m>;
 
     fn public_key(&self) -> Result<p256::PublicKey, DeviceError>;
 
@@ -35,7 +35,7 @@ pub trait ProvisionableContext: TransactionContext {
         Self: 'm;
 
     fn set_provisioning_data<'m>(
-        &mut self,
+        &self,
         data: &'m ProvisioningData,
     ) -> Self::SetProvisioningDataFuture<'m>;
 
@@ -55,8 +55,8 @@ pub trait ProvisionableContext: TransactionContext {
         mic: &[u8],
     ) -> Result<(), DeviceError>;
 
-    fn rng_u8(&mut self) -> u8;
-    fn rng_u32(&mut self) -> u32;
+    fn rng_u8(&self) -> u8;
+    fn rng_u32(&self) -> u32;
 }
 
 pub struct Provisionable {
@@ -80,7 +80,7 @@ impl Provisionable {
 
     pub async fn process_inbound<C: ProvisionableContext>(
         &mut self,
-        ctx: &mut C,
+        ctx: &C,
         pdu: ProvisioningPDU,
     ) -> Result<Option<ProvisioningPDU>, DeviceError> {
         match pdu {

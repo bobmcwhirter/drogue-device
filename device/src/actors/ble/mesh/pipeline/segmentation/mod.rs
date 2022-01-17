@@ -1,5 +1,4 @@
 use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::provisioning_bearer::ProvisioningBearerContext;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::generic_provisioning::{GenericProvisioningPDU, TransactionContinuation, TransactionStart};
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
@@ -11,57 +10,29 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use heapless::Vec;
 
 mod inbound;
-mod outbound;
+pub(crate) mod outbound;
 
-pub trait TransactionContext: ProvisioningBearerContext {
-
-    fn transmit_transaction_ack<'m>(&'m self) -> Self::GenericProvisioningPduFuture<'m> {
-        self.transmit_generic_provisioning_pdu(&GenericProvisioningPDU::TransactionAck)
-    }
-
-    type GenericProvisioningPduFuture<'m>: Future<Output = Result<(), DeviceError>>
-    where
-        Self: 'm;
-
-    fn transmit_generic_provisioning_pdu<'m>(
-        &'m self,
-        pdu: &'m GenericProvisioningPDU,
-    ) -> Self::GenericProvisioningPduFuture<'m>;
-}
-
-pub struct Transaction {
+pub struct Segmentation {
     inbound_segments: Option<InboundSegments>,
-    inbound_acks: Option<u8>,
-    outbound_transaction_number: u8,
-    outbound_segments: Option<OutboundSegments>,
 }
 
-impl Default for Transaction {
+impl Default for Segmentation {
     fn default() -> Self {
         Self {
             inbound_segments: None,
-            inbound_acks: None,
-            outbound_transaction_number: 0x80,
-            outbound_segments: None
         }
     }
 }
 
-impl Transaction {
-    pub async fn process_inbound<C: TransactionContext>(
+impl Segmentation {
+    pub async fn process_inbound(
         &mut self,
-        ctx: &mut C,
         pdu: GenericProvisioningPDU,
     ) -> Result<Option<ProvisioningPDU>, DeviceError> {
         match pdu {
             GenericProvisioningPDU::TransactionStart(transaction_start) => {
-                if self.check_ack(ctx).await? {
-                    return Ok(None);
-                }
-
                 if transaction_start.seg_n == 0 {
                     let pdu = ProvisioningPDU::parse(&*transaction_start.data)?;
-                    self.do_ack(ctx).await?;
                     Ok(Some(pdu))
                 } else {
                     if let None = &mut self.inbound_segments {
@@ -100,59 +71,13 @@ impl Transaction {
         }
     }
 
-    fn already_acked<C: TransactionContext>(&self, ctx: &mut C) -> bool {
-        if let Some(ack) = self.inbound_acks {
-            return ctx.transaction_number().unwrap() <= ack;
-        } else {
-            false
-        }
-    }
 
-    async fn check_ack<C: TransactionContext>(&mut self, ctx: &mut C) -> Result<bool, DeviceError> {
-        if !self.already_acked(ctx) {
-            Ok(false)
-        } else {
-            self.do_ack(ctx).await?;
-            Ok(true)
-        }
-    }
 
-    async fn do_ack<C: TransactionContext>(&self, ctx: &mut C) -> Result<(), DeviceError> {
-        ctx.transmit_transaction_ack().await?;
-        let mut acks = self.inbound_acks;
-        match acks {
-            None => {
-                acks = *ctx.transaction_number();
-            }
-            Some(latest) => {
-                // TODO fix wraparound rollover.
-                if ctx.transaction_number().unwrap() > latest {
-                    acks = *ctx.transaction_number();
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn process_outbound<C: TransactionContext>(
+    pub async fn process_outbound(
         &mut self,
-        ctx: &C,
-        pdu: Option<ProvisioningPDU>,
-    ) -> Result<(), DeviceError> {
-        match pdu {
-            None => {}
-            Some(pdu) => {
-                self.outbound_segments.replace(OutboundSegments::new(self.outbound_transaction_number, &pdu));
-                self.outbound_transaction_number = self.outbound_transaction_number + 1;
-            }
-        }
-
-        if let Some(segments) = &self.outbound_segments {
-            for segment in segments.iter() {
-                ctx.transmit_generic_provisioning_pdu(&segment).await?;
-            }
-        }
-        Ok(())
+        pdu: ProvisioningPDU,
+    ) -> OutboundSegments {
+        OutboundSegments::new(pdu)
     }
 }
 

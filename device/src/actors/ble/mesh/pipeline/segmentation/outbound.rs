@@ -1,5 +1,5 @@
 use heapless::Vec;
-use crate::actors::ble::mesh::pipeline::transaction::fcs;
+use crate::actors::ble::mesh::pipeline::segmentation::fcs;
 use crate::drivers::ble::mesh::generic_provisioning::{GenericProvisioningPDU, TransactionContinuation, TransactionStart};
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 
@@ -7,21 +7,19 @@ const TRANSACTION_START_MTU: usize = 20;
 const TRANSACTION_CONTINUATION_MTU: usize = 23;
 
 pub struct OutboundSegments {
-    transaction_number: u8,
     pdu: Vec<u8, 128>,
     num_segments: u8,
     fcs: u8,
 }
 
 impl OutboundSegments {
-    pub fn new(transaction_number: u8, pdu: &ProvisioningPDU) -> Self {
+    pub fn new(pdu: ProvisioningPDU) -> Self {
         let mut data = Vec::new();
         pdu.emit(&mut data);
         let fcs = fcs(&data);
         let num_segments = Self::num_chunks(&data);
 
         Self {
-            transaction_number,
             pdu: data,
             num_segments,
             fcs: fcs,

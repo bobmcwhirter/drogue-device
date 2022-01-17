@@ -1,8 +1,6 @@
 use crate::actors::ble::mesh::device::{Device, DeviceError};
 use crate::actors::ble::mesh::pipeline::mesh::MeshContext;
 use crate::actors::ble::mesh::pipeline::provisionable::ProvisionableContext;
-use crate::actors::ble::mesh::pipeline::provisioning_bearer::ProvisioningBearerContext;
-use crate::actors::ble::mesh::pipeline::transaction::TransactionContext;
 use crate::actors::ble::mesh::pipeline::{Pipeline, PipelineContext};
 use crate::actors::ble::mesh::vault::Vault;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
@@ -13,6 +11,7 @@ use crate::{Actor, Address, Inbox};
 use aes::Aes128;
 use cmac::crypto_mac::{InvalidKeyLength, Output};
 use cmac::{Cmac, Mac, NewMac};
+use core::cell::RefCell;
 use core::future::Future;
 use embassy::time::{Duration, Ticker};
 use futures::future::select;
@@ -30,44 +29,55 @@ pub trait Transmitter {
     fn transmit_bytes<'m>(&self, bytes: &[u8]) -> Self::TransmitFuture<'m>;
 }
 
+pub trait Receiver {
+    type ReceiveFuture<'m>: Future<Output = Result<&'m [u8], DeviceError>>
+    where
+        Self: 'm;
+    fn receive_bytes<'m>(&self) -> Self::ReceiveFuture<'m>;
+}
+
 enum State {
     Unprovisioned,
     Provisioning,
     Provisioned,
 }
 
-pub struct Node<T, V, R>
+pub struct Node<TX, RX, V, R>
 where
-    T: Transmitter,
+    TX: Transmitter,
+    RX: Receiver,
     V: Vault,
     R: RngCore + CryptoRng,
 {
     state: State,
-    link_id: Option<u32>,
-    transaction_number: Option<u8>,
+    link_id: RefCell<Option<u32>>,
+    transaction_number: RefCell<Option<u8>>,
     //
+    receiver: RX,
     transmitter: T,
-    vault: V,
-    rng: R,
-    pipeline: Pipeline,
+    vault: RefCell<V>,
+    rng: RefCell<R>,
+    pipeline: RefCell<Pipeline>,
     ticker: Ticker,
 }
 
-impl<T, V, R> Node<T, V, R>
+impl<TX, RX, V, R> Node<TX, RX, V, R>
 where
-    T: Transmitter + 'static,
+    TX: Transmitter + 'static,
+    RX: Receiver + 'static,
     V: Vault + 'static,
     R: RngCore + CryptoRng + 'static,
 {
-    pub fn new(capabilities: Capabilities, transmitter: T, vault: V, rng: R) -> Self {
+    pub fn new(capabilities: Capabilities, receiver: RX, transmitter: T, vault: V, rng: R) -> Self {
         Self {
             state: State::Unprovisioned,
-            link_id: None,
-            transaction_number: None,
+            link_id: RefCell::new(None),
+            transaction_number: RefCell::new(None),
+            receiver,
             transmitter,
-            vault,
-            rng,
-            pipeline: Pipeline::new(capabilities),
+            vault: RefCell::new(vault),
+            rng: RefCell::new(rng),
+            pipeline: RefCell::new(Pipeline::new(capabilities)),
             ticker: Ticker::every(Duration::from_secs(3)),
         }
     }
@@ -91,7 +101,8 @@ where
         inbox: &'m mut M,
     ) -> Result<Option<State>, DeviceError> {
         if let Some(mut message) = inbox.next().await {
-            self.pipeline.process_inbound( self, message.message() ).await?;
+            let mut pipeline = self.pipeline.borrow_mut();
+            pipeline.process_inbound(self, message.message()).await?;
         }
         Ok(None)
     }
@@ -102,11 +113,31 @@ where
     ) -> Result<Option<State>, DeviceError> {
         Ok(None)
     }
+
+    async fn run(&mut self) {
+        loop {
+            if let Ok(Some(next_state)) = match self.state {
+                State::Unprovisioned => {
+                    self.loop_unprovisioned().await;
+                }
+                State::Provisioning => {
+                    self.loop_provisioning().await;
+                }
+                State::Provisioned => {
+                    self.loop_provisioned().await;
+                }
+            } {
+                self.state = next_state
+            }
+        }
+    }
 }
 
-impl<T, V, R> Actor for Node<T, V, R>
+/*
+impl<TX, RX, V, R> Actor for Node<TX, RX, V, R>
 where
-    T: Transmitter + 'static,
+    TX: Transmitter + 'static,
+    RX: Receiver + 'static,
     V: Vault + 'static,
     R: RngCore + CryptoRng + 'static,
 {
@@ -137,3 +168,4 @@ where
         }
     }
 }
+ */

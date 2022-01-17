@@ -5,7 +5,7 @@ use crate::drivers::ble::mesh::provisioning::{
     Capabilities, Invite, PublicKey, Start,
 };
 use heapless::Vec;
-use crate::actors::ble::mesh::pipeline::transaction::Transaction;
+use crate::actors::ble::mesh::pipeline::segmentation::Segmentation;
 use crate::drivers::ble::mesh::crypto::s1;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 
