@@ -16,5 +16,7 @@ pub mod status;
 pub mod transport;
 pub mod crypto;
 pub mod storage;
+pub mod driver;
+pub mod vault;
 
 pub struct InsufficientBuffer;

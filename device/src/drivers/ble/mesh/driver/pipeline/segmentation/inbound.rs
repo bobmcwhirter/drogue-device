@@ -1,5 +1,5 @@
 use heapless::Vec;
-use crate::actors::ble::mesh::device::DeviceError;
+use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::InsufficientBuffer;
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 

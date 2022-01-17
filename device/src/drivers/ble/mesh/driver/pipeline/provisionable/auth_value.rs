@@ -1,6 +1,6 @@
 use heapless::Vec;
-use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::provisionable::ProvisionableContext;
+use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::pipeline::provisionable::ProvisionableContext;
 use crate::drivers::ble::mesh::provisioning::{InputOOBAction, OOBAction, OOBSize, OutputOOBAction, Start};
 
 pub enum AuthValue {

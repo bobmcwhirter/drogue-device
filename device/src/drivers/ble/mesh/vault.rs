@@ -13,8 +13,8 @@ use cmac::crypto_mac::{InvalidKeyLength, Output};
 use heapless::Vec;
 use p256::PublicKey;
 
-use crate::actors::ble::mesh::device::DeviceError;
 use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
 
 type AesCcm = Ccm<Aes128, U8, U13>;

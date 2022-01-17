@@ -1,11 +1,6 @@
 mod auth_value;
 mod transcript;
 
-use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::provisionable::auth_value::{
-    determine_auth_value, AuthValue,
-};
-use crate::actors::ble::mesh::pipeline::provisionable::transcript::Transcript;
 use crate::drivers::ble::mesh::provisioning::{
     Capabilities, Confirmation, ProvisioningData, ProvisioningPDU, PublicKey, Random,
 };
@@ -17,7 +12,10 @@ use core::future::Future;
 use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
-use crate::actors::ble::mesh::pipeline::mesh::MeshContext;
+use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
+use crate::drivers::ble::mesh::driver::pipeline::provisionable::auth_value::{AuthValue, determine_auth_value};
+use crate::drivers::ble::mesh::driver::pipeline::provisionable::transcript::Transcript;
 
 pub trait ProvisionableContext : MeshContext {
     fn rng_fill(&self, dest: &mut [u8]);

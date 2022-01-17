@@ -1,25 +1,26 @@
 use heapless::Vec;
 use rand_core::{CryptoRng, RngCore};
-use crate::actors::ble::mesh::node::{Node, Transmitter};
-use crate::actors::ble::mesh::pipeline::provisionable::ProvisionableContext;
-use crate::actors::ble::mesh::vault::Vault;
 use core::future::Future;
 use core::borrow::BorrowMut;
 use aes::Aes128;
 use cmac::Cmac;
 use cmac::crypto_mac::Output;
 use p256::PublicKey;
-use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::mesh::MeshContext;
-use crate::actors::ble::mesh::pipeline::PipelineContext;
+use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
+use crate::drivers::ble::mesh::driver::pipeline::PipelineContext;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::node::{Node, Receiver, Transmitter};
+use crate::drivers::ble::mesh::driver::pipeline::provisionable::ProvisionableContext;
 use crate::drivers::ble::mesh::generic_provisioning::GenericProvisioningPDU;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
+use crate::drivers::ble::mesh::vault::Vault;
 
-impl<T, V, R> ProvisionableContext for Node<T, V, R>
+impl<TX, RX, V, R> ProvisionableContext for Node<TX, RX, V, R>
     where
-        T: Transmitter,
+        TX: Transmitter,
+        RX: Receiver,
         V: Vault,
         R: RngCore + CryptoRng,
 {
@@ -85,9 +86,10 @@ impl<T, V, R> ProvisionableContext for Node<T, V, R>
     }
 }
 
-impl<T, V, R> MeshContext for Node<T, V, R>
+impl<TX, RX, V, R> MeshContext for Node<TX, RX, V, R>
     where
-        T: Transmitter,
+        TX: Transmitter,
+        RX: Receiver,
         V: Vault,
         R: RngCore + CryptoRng,
 {
@@ -110,9 +112,10 @@ impl<T, V, R> MeshContext for Node<T, V, R>
     }
 }
 
-impl<T, V, R> PipelineContext for Node<T, V, R>
+impl<TX, RX, V, R> PipelineContext for Node<TX, RX, V, R>
     where
-        T: Transmitter,
+        TX: Transmitter,
+        RX: Receiver,
         V: Vault,
         R: RngCore + CryptoRng,
 {

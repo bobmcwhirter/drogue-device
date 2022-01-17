@@ -1,10 +1,9 @@
-use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::mesh::{Mesh, MeshData};
-use crate::actors::ble::mesh::pipeline::provisionable::{Provisionable, ProvisionableContext};
-use crate::actors::ble::mesh::pipeline::provisioning_bearer::ProvisioningBearer;
-use crate::actors::ble::mesh::pipeline::segmentation::Segmentation;
 use crate::drivers::ble::mesh::provisioning::{Capabilities, ProvisioningPDU};
 use heapless::Vec;
+use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::pipeline::mesh::{Mesh, MeshData};
+use crate::drivers::ble::mesh::driver::pipeline::provisionable::{Provisionable, ProvisionableContext};
+use crate::drivers::ble::mesh::driver::pipeline::provisioning_bearer::ProvisioningBearer;
 
 pub mod mesh;
 pub mod provisionable;

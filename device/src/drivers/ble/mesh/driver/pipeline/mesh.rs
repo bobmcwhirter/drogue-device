@@ -1,8 +1,8 @@
-use crate::actors::ble::mesh::device::DeviceError;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::PB_ADV;
 use core::future::Future;
+use crate::drivers::ble::mesh::driver::DeviceError;
 
 pub trait MeshContext {
     fn uuid(&self) -> Uuid;

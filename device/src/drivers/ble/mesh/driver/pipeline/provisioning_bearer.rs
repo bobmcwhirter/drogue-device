@@ -1,9 +1,3 @@
-use crate::actors::ble::mesh::device::DeviceError;
-use crate::actors::ble::mesh::pipeline::mesh::MeshContext;
-use crate::actors::ble::mesh::pipeline::segmentation::outbound::{
-    OutboundSegments, OutboundSegmentsIter,
-};
-use crate::actors::ble::mesh::pipeline::segmentation::Segmentation;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::generic_provisioning::{
     GenericProvisioningPDU, ProvisioningBearerControl,
@@ -12,6 +6,10 @@ use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 use core::future::Future;
 use core::iter::Iterator;
 use heapless::Vec;
+use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
+use crate::drivers::ble::mesh::driver::pipeline::segmentation::outbound::{OutboundSegments, OutboundSegmentsIter};
+use crate::drivers::ble::mesh::driver::pipeline::segmentation::Segmentation;
 
 pub struct ProvisioningBearer {
     segmentation: Segmentation,

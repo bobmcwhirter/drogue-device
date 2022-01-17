@@ -1,4 +1,3 @@
-use crate::actors::ble::mesh::device::DeviceError;
 use crate::drivers::ble::mesh::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::generic_provisioning::{GenericProvisioningPDU, TransactionContinuation, TransactionStart};
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
@@ -8,6 +7,7 @@ use self::outbound::OutboundSegments;
 use core::future::Future;
 use core::sync::atomic::{AtomicBool, Ordering};
 use heapless::Vec;
+use crate::drivers::ble::mesh::driver::DeviceError;
 
 mod inbound;
 pub(crate) mod outbound;

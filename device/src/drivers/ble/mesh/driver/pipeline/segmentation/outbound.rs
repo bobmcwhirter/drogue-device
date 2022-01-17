@@ -1,5 +1,5 @@
 use heapless::Vec;
-use crate::actors::ble::mesh::pipeline::segmentation::fcs;
+use crate::drivers::ble::mesh::driver::pipeline::segmentation::fcs;
 use crate::drivers::ble::mesh::generic_provisioning::{GenericProvisioningPDU, TransactionContinuation, TransactionStart};
 use crate::drivers::ble::mesh::provisioning::ProvisioningPDU;
 
