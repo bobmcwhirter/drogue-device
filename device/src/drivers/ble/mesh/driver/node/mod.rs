@@ -109,7 +109,7 @@ where
         Ok(None)
     }
 
-    async fn run(&mut self) {
+    pub async fn run(&mut self) {
         loop {
             if let Ok(Some(next_state)) = match self.state {
                 State::Unprovisioned => {

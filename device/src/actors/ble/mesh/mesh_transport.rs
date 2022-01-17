@@ -9,24 +9,16 @@ use core::marker::PhantomData;
 use rand_core::{CryptoRng, RngCore};
 use crate::drivers::ble::mesh::storage::Storage;
 
-pub struct BleMeshBearer<T, R, S>
+pub struct MeshTransport<T>
 where
     T: Transport + 'static,
-    R: RngCore + CryptoRng + 'static,
-    S: Storage + 'static,
 {
     transport: T,
-    start: ActorContext<Start<T>>,
-    rx: ActorContext<Rx<T, R, S>>,
-    tx: ActorContext<Tx<T>>,
-    device: ActorContext<Device<T, R, S>>,
 }
 
-impl<T, R, S> BleMeshBearer<T, R, S>
+impl<T> MeshTransport<T>
 where
     T: Transport + 'static,
-    R: RngCore + CryptoRng + 'static,
-    S: Storage + 'static,
 {
     pub fn new(transport: T) -> Self {
         Self {
