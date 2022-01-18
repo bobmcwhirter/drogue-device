@@ -1,6 +1,5 @@
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::storage::{Payload, Storage};
-use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::drivers::ble::mesh::{MESH_BEACON, MESH_MESSAGE, PB_ADV};
 use core::future::Future;
 use core::mem;
@@ -12,12 +11,19 @@ use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
 use nrf_softdevice::{random_bytes, raw, Softdevice};
 use rand_core::{CryptoRng, Error, RngCore};
+use crate::drivers::ble::mesh::transport::{Handler, Transport};
 
 pub struct Nrf52BleMeshTransport {
     pub(crate) sd: &'static Softdevice,
 }
 
 impl Nrf52BleMeshTransport {
+    pub fn new(device_name: &'static str) -> Self {
+        Self {
+            sd: Self::new_sd(device_name),
+        }
+    }
+
     fn new_sd(device_name: &'static str) -> &'static Softdevice {
         let config = nrf_softdevice::Config {
             clock: Some(raw::nrf_clock_lf_cfg_t {
@@ -57,12 +63,14 @@ impl Nrf52BleMeshTransport {
         SoftdeviceRng { sd: self.sd }
     }
 
+    /*
     pub fn storage(&self, address: usize) -> SoftdeviceStorage {
         SoftdeviceStorage {
             address,
             flash: nrf_softdevice::Flash::take(self.sd),
         }
     }
+     */
 }
 
 pub struct SoftdeviceRng {
@@ -100,6 +108,7 @@ impl RngCore for SoftdeviceRng {
 
 impl CryptoRng for SoftdeviceRng {}
 
+/*
 pub struct SoftdeviceStorage {
     address: usize,
     flash: nrf_softdevice::Flash,
@@ -141,53 +150,9 @@ impl Storage for SoftdeviceStorage {
         }
     }
 }
+ */
 
 impl Transport for Nrf52BleMeshTransport {
-    fn new() -> Self {
-        Self {
-            sd: Self::new_sd("Drogue BLE-Mesh"),
-        }
-    }
-
-    type StartFuture<'m> = impl Future<Output = ()> + 'm;
-
-    fn start<'m>(&'m self) -> Self::StartFuture<'m> {
-        async move {
-            self.sd.run().await;
-        }
-    }
-
-    type SendUnprovisionedBeaconFuture<'m> = impl Future<Output = ()> + 'm;
-
-    fn send_unprovisioned_beacon<'m>(
-        &'m self,
-        uuid: Uuid,
-    ) -> Self::SendUnprovisionedBeaconFuture<'m> {
-        async move {
-            let mut adv_data: Vec<u8, 31> = Vec::new();
-            adv_data.extend_from_slice(&[20, MESH_BEACON, 0x00]).ok();
-
-            adv_data.extend_from_slice(&uuid.0).ok();
-
-            adv_data.extend_from_slice(&[0xa0, 0x40]).ok();
-
-            let adv = peripheral::NonconnectableAdvertisement::NonscannableUndirected {
-                adv_data: &*adv_data,
-            };
-
-            peripheral::advertise(
-                self.sd,
-                adv,
-                &peripheral::Config {
-                    max_events: Some(1),
-                    ..Default::default()
-                },
-            )
-            .await
-            .ok();
-        }
-    }
-
     type TransmitFuture<'m> = impl Future<Output = ()> + 'm;
 
     fn transmit<'m>(&'m self, message: &'m [u8]) -> Self::TransmitFuture<'m> {

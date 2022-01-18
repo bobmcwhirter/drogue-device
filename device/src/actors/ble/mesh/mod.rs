@@ -1,37 +1,30 @@
-mod mesh_node;
-
-use crate::drivers::ble::mesh::transport::{Handler, Transport};
-use crate::{Actor, ActorContext, ActorSpawner, Address, Inbox, Package};
-use core::future::Future;
-
-use crate::actors::ble::mesh::mesh_node::MeshNode;
-use crate::drivers::ble::mesh::device::Uuid;
+use crate::drivers::ble::mesh::driver::node::{Node, Receiver, Transmitter};
+use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
-use crate::drivers::ble::mesh::storage::Storage;
+use crate::drivers::ble::mesh::transport::{Handler, Transport};
 use crate::drivers::ble::mesh::vault::Vault;
+use crate::{Actor, Address, Inbox};
+use core::future::Future;
 use core::marker::PhantomData;
-use core::cell::RefCell;
-use rand_core::{CryptoRng, RngCore};
+use embassy::blocking_mutex::kind::CriticalSection;
+use embassy::channel::mpsc::{self, Channel};
+use futures::{join, pin_mut};
 use heapless::Vec;
+use rand_core::{CryptoRng, RngCore};
 
-pub struct BleMesh<T, V, R>
+pub struct MeshNode<T, V, R>
 where
     T: Transport + 'static,
     V: Vault + 'static,
     R: RngCore + CryptoRng + 'static,
 {
-    capabilities: RefCell<Option<Capabilities>>,
+    capabilities: Option<Capabilities>,
     transport: T,
-    vault: RefCell<Option<V>>,
-    rng: RefCell<Option<R>>,
-    start: ActorContext<Start<T>>,
-    rx: ActorContext<Rx<T, V, R>>,
-    node: ActorContext<MeshNode<T, V, R>>,
-    //
-    noop: ActorContext<NoOp>,
+    vault: Option<V>,
+    rng: Option<R>,
 }
 
-impl<T,V, R> BleMesh<T,V, R>
+impl<T, V, R> MeshNode<T, V, R>
 where
     T: Transport + 'static,
     V: Vault + 'static,
@@ -39,136 +32,150 @@ where
 {
     pub fn new(capabilities: Capabilities, transport: T, vault: V, rng: R) -> Self {
         Self {
-            capabilities: RefCell::new(Some(capabilities)),
+            capabilities: Some(capabilities),
             transport,
-            vault: RefCell::new(Some(vault)),
-            rng: RefCell::new(Some(rng)),
-            start: ActorContext::new(),
-            rx: ActorContext::new(),
-            node: ActorContext::new(),
-            noop: ActorContext::new(),
+            vault: Some(vault),
+            rng: Some(rng),
         }
     }
 }
 
-impl<T, V, R> Package for BleMesh<T, V, R>
+struct TransportReceiver<'c>
+{
+    receiver: mpsc::Receiver<'c, CriticalSection, Vec<u8, 384>, 6>,
+}
+
+impl<'c> TransportReceiver<'c>
+{
+    fn new(receiver: mpsc::Receiver<'c, CriticalSection, Vec<u8, 384>, 6>) -> Self {
+        Self {
+            receiver,
+        }
+    }
+}
+
+impl<'c> Receiver for TransportReceiver<'c>
+{
+    type ReceiveFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<Vec<u8, 384>, DeviceError>>;
+
+    fn receive_bytes<'m>(&'m mut self) -> Self::ReceiveFuture<'m> {
+        async move {
+            loop {
+                if let Some(bytes) = self.receiver.recv().await {
+                    return Ok(bytes)
+                }
+            }
+        }
+    }
+}
+
+struct TransportHandler<'t, 'c, T>
+where
+    T: Transport + 't,
+{
+    transport: &'t T,
+    sender: mpsc::Sender<'c, CriticalSection, Vec<u8, 384>, 6>,
+}
+
+impl<'t, 'c, T> TransportHandler<'t, 'c, T>
+    where
+        T: Transport + 't,
+{
+    fn new(transport: &'t T, sender: mpsc::Sender<'c, CriticalSection, Vec<u8, 384>, 6>) -> Self {
+        Self {
+            transport,
+            sender,
+        }
+    }
+
+    async fn start(&self) {
+        self.transport.start_receive(self).await
+    }
+}
+
+impl<'t, 'c, T> Handler for TransportHandler<'t, 'c, T>
+    where
+        T: Transport + 't,
+{
+    fn handle(&self, message: Vec<u8, 384>) {
+        self.sender.try_send(message);
+    }
+}
+
+
+struct TransportTransmitter<'t, T>
+where
+    T: Transport + 't,
+{
+    transport: &'t T,
+}
+
+impl<'t, T> Transmitter for TransportTransmitter<'t, T>
+where
+    T: Transport + 't,
+{
+    type TransmitFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<(), DeviceError>>;
+
+    fn transmit_bytes<'m>(&'m self, bytes: &'m [u8]) -> Self::TransmitFuture<'m> {
+        async move {
+            self.transport.transmit(bytes).await;
+            Ok(())
+        }
+    }
+}
+
+impl<T, V, R> Actor for MeshNode<T, V, R>
 where
     T: Transport + 'static,
     V: Vault + 'static,
     R: RngCore + CryptoRng + 'static,
 {
-    type Primary = NoOp;
-    type Configuration = ();
+    type Message<'m> = Vec<u8, 384>;
+    type OnMountFuture<'m, M>
+    where
+        M: 'm,
+    = impl Future<Output = ()> + 'm;
 
-    fn mount<AS: ActorSpawner>(
-        &'static self,
-        config: Self::Configuration,
-        spawner: AS,
-    ) -> Address<Self::Primary> {
-        let _ = self.start.mount(spawner, Start(&self.transport));
-
-        let node = self.node.mount(
-            spawner,
-            MeshNode::new(
-                self.capabilities.borrow_mut().take().unwrap(),
-                &self.transport,
-                self.vault.borrow_mut().take().unwrap(),
-                self.rng.borrow_mut().take().unwrap(),
-            ),
-        );
-
-        let _rx = self.rx.mount(
-            spawner,
-            Rx {
+    fn on_mount<'m, M>(
+        &'m mut self,
+        _: Address<Self>,
+        inbox: &'m mut M,
+    ) -> Self::OnMountFuture<'m, M>
+    where
+        M: Inbox<Self> + 'm,
+    {
+        async move {
+            let tx = TransportTransmitter {
                 transport: &self.transport,
-                handler: node,
-            },
-        );
+            };
 
-        self.noop.mount(spawner, NoOp{})
-    }
-}
+            let mut channel = Channel::new();
+            let (sender, receiver) = mpsc::split(&mut channel);
 
-struct Start<T: Transport + 'static>(&'static T);
+            let mut rx = TransportReceiver::new(receiver);
+            let mut handler = TransportHandler::new(&self.transport, sender);
 
-impl<T> Actor for Start<T>
-where
-    T: Transport + 'static,
-{
-    type OnMountFuture<'m, M>
-    where
-        Self: 'm,
-        M: 'm,
-    = impl Future<Output = ()> + 'm;
+            let mut node = Node::new(
+                self.capabilities.take().unwrap(),
+                tx,
+                rx,
+                self.vault.take().unwrap(),
+                self.rng.take().unwrap(),
+            );
 
-    fn on_mount<'m, M>(&'m mut self, _: Address<Self>, _: &'m mut M) -> Self::OnMountFuture<'m, M>
-    where
-        M: Inbox<Self> + 'm,
-    {
-        async move {
-            self.0.start().await;
+            let node_fut = node.run();
+            let handler_fut = handler.start();
+
+            pin_mut!(node_fut);
+            pin_mut!(handler_fut);
+
+            join!(node_fut, handler_fut);
         }
-    }
-}
-
-struct Rx<T, V, R>
-where
-    T: Transport + 'static,
-    V: Vault + 'static,
-    R: RngCore + CryptoRng + 'static,
-{
-    transport: &'static T,
-    handler: Address<MeshNode<T, V, R>>,
-}
-
-impl<T, V, R> Actor for Rx<T, V, R>
-where
-    T: Transport + 'static,
-    V: Vault + 'static,
-    R: RngCore + CryptoRng + 'static,
-{
-    type OnMountFuture<'m, M>
-    where
-        Self: 'm,
-        M: 'm,
-    = impl Future<Output = ()> + 'm;
-    fn on_mount<'m, M>(&'m mut self, _: Address<Self>, _: &'m mut M) -> Self::OnMountFuture<'m, M>
-    where
-        M: Inbox<Self> + 'm,
-    {
-        async move {
-            self.transport.start_receive(&self.handler).await;
-        }
-    }
-}
-
-pub struct NoOp {
-
-}
-
-impl Actor for NoOp {
-    type Message<'m> = ();
-    type OnMountFuture<'m, M>
-        where
-            Self: 'm,
-            M: 'm,
-    = impl Future<Output = ()> + 'm;
-
-    fn on_mount<'m, M>(&'m mut self, _: Address<Self>, _: &'m mut M) -> Self::OnMountFuture<'m, M> where M: Inbox<Self> + 'm {
-         async move {
-
-         }
-    }
-}
-
-
-impl<T, V, R> Handler for Address<MeshNode<T, V, R>>
-    where
-        T: Transport + 'static,
-        V: Vault + 'static,
-        R: RngCore + CryptoRng + 'static,
-{
-    fn handle<'m>(&self, message: Vec<u8, 384>) {
-        self.notify(message).ok();
     }
 }

@@ -7,14 +7,15 @@
 #[cfg(feature = "defmt-rtt")]
 use defmt_rtt as _;
 use drogue_device::{ActorContext, actors, DeviceContext, drivers, Package};
-use drogue_device::actors::ble::mesh::BleMesh;
-use drogue_device::drivers::ble::mesh::controller::nrf52::{Nrf52BleMeshTransport, SoftdeviceStorage, SoftdeviceRng};
+use drogue_device::actors::ble::mesh::MeshNode;
 use drogue_device::drivers::ble::mesh::device::Uuid;
 use drogue_device::drivers::ble::mesh::provisioning::{
     Algorithms, Capabilities, InputOOBActions, OOBSize, OutputOOBActions, PublicKeyType,
     StaticOOBType,
 };
+use drogue_device::drivers::ble::mesh::transport::nrf52::{Nrf52BleMeshTransport, SoftdeviceRng};
 use drogue_device::drivers::ble::mesh::transport::Transport;
+use drogue_device::drivers::ble::mesh::vault::InMemoryVault;
 use embassy::executor::Spawner;
 use embassy_nrf::{
     gpio::{AnyPin, Output},
@@ -28,7 +29,7 @@ use panic_probe as _;
 
 pub struct MyDevice {
     led: ActorContext<actors::led::Led<drivers::led::Led<Output<'static, AnyPin>>>>,
-    mesh: BleMesh<Nrf52BleMeshTransport, SoftdeviceRng, SoftdeviceStorage>,
+    mesh: ActorContext<MeshNode<Nrf52BleMeshTransport, InMemoryVault, SoftdeviceRng>>,
 }
 
 static DEVICE: DeviceContext<MyDevice> = DeviceContext::new();
@@ -51,14 +52,11 @@ extern "C" {
 
 #[embassy::main(config = "config()")]
 async fn main(spawner: Spawner, p: Peripherals) {
-    let transport = Nrf52BleMeshTransport::new();
+    let transport = Nrf52BleMeshTransport::new("Drogue IoT BLE Mesh");
     let rng = transport.rng();
-    let storage = transport.storage(unsafe { &__storage as *const u8 as usize } );
+    let vault = InMemoryVault::new( NODE_UUID );
+    //let storage = transport.storage(unsafe { &__storage as *const u8 as usize } );
 
-    let device = DEVICE.configure(MyDevice {
-        led: ActorContext::new(),
-        mesh: BleMesh::new(transport)
-    });
 
     let capabilities = Capabilities {
         number_of_elements: 1,
@@ -71,5 +69,10 @@ async fn main(spawner: Spawner, p: Peripherals) {
         input_oob_action: InputOOBActions::default(),
     };
 
-    device.mesh.mount((rng, storage, NODE_UUID, capabilities), spawner);
+    let device = DEVICE.configure(MyDevice {
+        led: ActorContext::new(),
+        mesh: ActorContext::new(),
+    });
+    let mesh_node = MeshNode::new(capabilities, transport, vault, rng);
+    device.mesh.mount(spawner, mesh_node);
 }

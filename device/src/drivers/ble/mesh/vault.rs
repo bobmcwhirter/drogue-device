@@ -1,15 +1,15 @@
 use core::convert::TryInto;
 use core::future::Future;
 
-use aes::{Aes128, NewBlockCipher};
 use aes::cipher::generic_array::GenericArray;
-use ccm::aead::{AeadInPlace, Buffer};
-use ccm::Ccm;
-use ccm::consts::U13;
+use aes::{Aes128, NewBlockCipher};
 use ccm::aead::NewAead;
+use ccm::aead::{AeadInPlace, Buffer};
+use ccm::consts::U13;
 use ccm::consts::U8;
-use cmac::{Cmac, Mac, NewMac};
+use ccm::Ccm;
 use cmac::crypto_mac::{InvalidKeyLength, Output};
+use cmac::{Cmac, Mac, NewMac};
 use heapless::Vec;
 use p256::PublicKey;
 
@@ -24,7 +24,7 @@ pub trait Vault {
 
     type SetPeerPublicKeyFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
-    Self: 'm;
+        Self: 'm;
 
     fn set_peer_public_key<'m>(&mut self, pk: PublicKey) -> Self::SetPeerPublicKeyFuture<'m>;
 
@@ -67,7 +67,9 @@ pub trait Vault {
         let t = &self.aes_cmac(&salt.into_bytes(), n)?.into_bytes();
 
         let mut input: Vec<u8, 64> = Vec::new();
-        input.extend_from_slice(p).map_err(|_| DeviceError::InvalidKeyLength)?;
+        input
+            .extend_from_slice(p)
+            .map_err(|_| DeviceError::InvalidKeyLength)?;
         input.push(0x01);
         let t1 = &self.aes_cmac(t, &input)?.into_bytes();
 
@@ -75,8 +77,12 @@ pub trait Vault {
         defmt::info!("NID {:x}", nid);
 
         input.truncate(0);
-        input.extend_from_slice(&t1).map_err(|_| DeviceError::InvalidKeyLength)?;
-        input.extend_from_slice(p).map_err(|_| DeviceError::InvalidKeyLength)?;
+        input
+            .extend_from_slice(&t1)
+            .map_err(|_| DeviceError::InvalidKeyLength)?;
+        input
+            .extend_from_slice(p)
+            .map_err(|_| DeviceError::InvalidKeyLength)?;
         input.push(0x02);
 
         let t2 = self.aes_cmac(t, &input)?.into_bytes();
@@ -84,8 +90,12 @@ pub trait Vault {
         let encryption_key = t2;
 
         input.truncate(0);
-        input.extend_from_slice(&t2).map_err(|_| DeviceError::InvalidKeyLength)?;
-        input.extend_from_slice(p).map_err(|_| DeviceError::InvalidKeyLength)?;
+        input
+            .extend_from_slice(&t2)
+            .map_err(|_| DeviceError::InvalidKeyLength)?;
+        input
+            .extend_from_slice(p)
+            .map_err(|_| DeviceError::InvalidKeyLength)?;
         input.push(0x03);
 
         let t3 = self.aes_cmac(t, &input)?.into_bytes();
@@ -93,8 +103,12 @@ pub trait Vault {
 
         Ok((
             nid,
-            encryption_key.try_into().map_err(|_| DeviceError::InvalidKeyLength)?,
-            privacy_key.try_into().map_err(|_| DeviceError::InvalidKeyLength)?,
+            encryption_key
+                .try_into()
+                .map_err(|_| DeviceError::InvalidKeyLength)?,
+            privacy_key
+                .try_into()
+                .map_err(|_| DeviceError::InvalidKeyLength)?,
         ))
     }
 
@@ -107,15 +121,64 @@ pub trait Vault {
     ) -> Result<(), DeviceError> {
         let key = GenericArray::<u8, <Aes128 as NewBlockCipher>::KeySize>::from_slice(key);
         let ccm = AesCcm::new(&key);
-        ccm.decrypt_in_place_detached(nonce.into(), &[], data, mic.into()).map_err(|_|DeviceError::CryptoError)
+        ccm.decrypt_in_place_detached(nonce.into(), &[], data, mic.into())
+            .map_err(|_| DeviceError::CryptoError)
     }
 
     type SetProvisioningDataFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
-    Self: 'm;
+        Self: 'm;
 
     fn set_provisioning_data<'m>(
         &mut self,
         data: &'m ProvisioningData,
     ) -> Self::SetProvisioningDataFuture<'m>;
+}
+
+pub struct InMemoryVault {
+    uuid: Uuid,
+}
+
+impl InMemoryVault {
+    pub fn new(uuid: Uuid) -> Self {
+        Self { uuid }
+    }
+}
+
+impl Vault for InMemoryVault {
+    fn uuid(&self) -> Uuid {
+        todo!()
+    }
+
+    type SetPeerPublicKeyFuture<'m>
+    where
+        Self: 'm,
+    = impl Future<Output = Result<(), DeviceError>>;
+
+    fn set_peer_public_key<'m>(&mut self, pk: PublicKey) -> Self::SetPeerPublicKeyFuture<'m> {
+        async move {
+            todo!()
+        }
+    }
+
+    fn public_key(&self) -> Result<PublicKey, DeviceError> {
+        todo!()
+    }
+
+    fn n_k1(&self, salt: &[u8], p: &[u8]) -> Result<Output<Cmac<Aes128>>, DeviceError> {
+        todo!()
+    }
+
+    type SetProvisioningDataFuture<'m>
+    where
+    Self: 'm = impl Future<Output = Result<(), DeviceError>>;
+
+    fn set_provisioning_data<'m>(
+        &mut self,
+        data: &'m ProvisioningData,
+    ) -> Self::SetProvisioningDataFuture<'m> {
+        async move {
+            todo!()
+        }
+    }
 }
