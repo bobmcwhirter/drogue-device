@@ -147,7 +147,7 @@ impl InMemoryVault {
 
 impl Vault for InMemoryVault {
     fn uuid(&self) -> Uuid {
-        todo!()
+        self.uuid
     }
 
     type SetPeerPublicKeyFuture<'m>

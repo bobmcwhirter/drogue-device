@@ -11,11 +11,12 @@ use cmac::{Cmac, Mac, NewMac};
 use core::cell::RefCell;
 use core::future::Future;
 use embassy::time::{Duration, Ticker};
-use futures::future::select;
+use futures::future::{select, Either};
 use futures::{join, pin_mut, StreamExt};
 use heapless::Vec;
 use p256::PublicKey;
 use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::MESH_BEACON;
 
 mod context;
 
@@ -30,7 +31,7 @@ pub trait Receiver {
     type ReceiveFuture<'m>: Future<Output = Result<Vec<u8, 384>, DeviceError>>
     where
         Self: 'm;
-    fn receive_bytes<'m>(&'m mut self) -> Self::ReceiveFuture<'m>;
+    fn receive_bytes<'m>(&'m self) -> Self::ReceiveFuture<'m>;
 }
 
 enum State {
@@ -88,8 +89,29 @@ where
         pin_mut!(receive_fut);
         pin_mut!(ticker_fut);
 
-        //let result = match select(inbox_fut, ticker_fut).await {}
+        let result = select(receive_fut, ticker_fut).await;
+
+        let result = match result {
+            Either::Left((Ok(msg), _)) => {
+                self.pipeline.borrow_mut().process_inbound(self, &*msg);
+            }
+            Either::Right((_, _)) => {
+                self.transmit_unprovisioned_beacon().await;
+            }
+            _ => {
+                // TODO handle this
+            }
+        };
         Ok(None)
+    }
+
+    async fn transmit_unprovisioned_beacon(&self) {
+        let mut adv_data: Vec<u8, 31> = Vec::new();
+        adv_data.extend_from_slice(&[20, MESH_BEACON, 0x00]).ok();
+        adv_data.extend_from_slice(&self.vault.borrow().uuid().0).ok();
+        adv_data.extend_from_slice(&[0xa0, 0x40]).ok();
+
+        self.transmitter.transmit_bytes(&*adv_data).await;
     }
 
     async fn loop_provisioning(&mut self) -> Result<Option<State>, DeviceError> {

@@ -10,6 +10,7 @@ use heapless::Vec;
 use nrf_softdevice::ble::central::ScanConfig;
 use nrf_softdevice::ble::{central, peripheral};
 use nrf_softdevice::{random_bytes, raw, Softdevice};
+use nrf_softdevice::ble::peripheral::AdvertiseError;
 use rand_core::{CryptoRng, Error, RngCore};
 use crate::drivers::ble::mesh::transport::{Handler, Transport};
 
@@ -160,18 +161,15 @@ impl Transport for Nrf52BleMeshTransport {
             peripheral::NonconnectableAdvertisement::NonscannableUndirected { adv_data: message };
 
         async move {
-            peripheral::advertise(
+            let result = peripheral::advertise(
                 self.sd,
                 adv,
                 &peripheral::Config {
                     max_events: Some(1),
-                    //interval: 100,
-                    //timeout: Some(300),
                     ..Default::default()
                 },
             )
-            .await
-            .ok();
+            .await.ok();
         }
     }
 

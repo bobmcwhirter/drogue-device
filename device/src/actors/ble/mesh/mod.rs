@@ -1,3 +1,6 @@
+
+pub mod transport;
+
 use crate::drivers::ble::mesh::driver::node::{Node, Receiver, Transmitter};
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
@@ -6,6 +9,7 @@ use crate::drivers::ble::mesh::vault::Vault;
 use crate::{Actor, Address, Inbox};
 use core::future::Future;
 use core::marker::PhantomData;
+use core::cell::RefCell;
 use embassy::blocking_mutex::kind::CriticalSection;
 use embassy::channel::mpsc::{self, Channel};
 use futures::{join, pin_mut};
@@ -42,14 +46,14 @@ where
 
 struct TransportReceiver<'c>
 {
-    receiver: mpsc::Receiver<'c, CriticalSection, Vec<u8, 384>, 6>,
+    receiver: RefCell<mpsc::Receiver<'c, CriticalSection, Vec<u8, 384>, 6>>,
 }
 
 impl<'c> TransportReceiver<'c>
 {
     fn new(receiver: mpsc::Receiver<'c, CriticalSection, Vec<u8, 384>, 6>) -> Self {
         Self {
-            receiver,
+            receiver: RefCell::new(receiver),
         }
     }
 }
@@ -61,10 +65,10 @@ impl<'c> Receiver for TransportReceiver<'c>
         Self: 'm,
     = impl Future<Output = Result<Vec<u8, 384>, DeviceError>>;
 
-    fn receive_bytes<'m>(&'m mut self) -> Self::ReceiveFuture<'m> {
+    fn receive_bytes<'m>(&'m self) -> Self::ReceiveFuture<'m> {
         async move {
             loop {
-                if let Some(bytes) = self.receiver.recv().await {
+                if let Some(bytes) = self.receiver.borrow_mut().recv().await {
                     return Ok(bytes)
                 }
             }
@@ -124,6 +128,7 @@ where
 
     fn transmit_bytes<'m>(&'m self, bytes: &'m [u8]) -> Self::TransmitFuture<'m> {
         async move {
+            defmt::info!("transmit {:x}", bytes);
             self.transport.transmit(bytes).await;
             Ok(())
         }
