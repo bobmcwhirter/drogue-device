@@ -10,7 +10,7 @@ pub enum PDU {
 impl PDU {
     pub fn parse(ctl: bool, data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 2 {
-            let seg = data[0] & 0b10000000 == 1;
+            let seg = data[0] & 0b10000000 != 0;
 
             match (ctl, seg) {
                 (true, false) => {
@@ -64,11 +64,41 @@ impl PDU {
     }
 
     fn parse_unsegmented_access(data: &[u8]) -> Result<Access, ParseError> {
-        todo!()
+        let akf = data[0] & 0b01000000 != 0;
+        let aid = data[0] & 0b00111111;
+        Ok(
+            Access {
+                akf,
+                aid,
+                message: AccessMessage::Unsegmented(
+                    Vec::from_slice(&data[1..]).map_err(|_|ParseError::InsufficientBuffer)?
+                )
+            }
+        )
     }
 
     fn parse_segmented_access(data: &[u8]) -> Result<Access, ParseError> {
-        todo!()
+        let akf = data[0] & 0b01000000 != 0;
+        let aid = data[0] & 0b00111111;
+        let szmic = data[1] & 0b1000000 != 0;
+        let seq_zero = u16::from_be_bytes([ data[1] & 0b01111111, data[2] & 0b11111100 ]) >> 2;
+        let seg_o = (u16::from_be_bytes( [ data[2] & 0b00000011, data[3] & 0b11100000 ] ) >> 5) as u8;
+        let seg_n = data[3] & 0b00011111;
+        let segment_m = &data[4..];
+        
+        Ok(
+            Access {
+                akf,
+                aid,
+                message: AccessMessage::Segmented {
+                    szmic,
+                    seq_zero,
+                    seg_o,
+                    seg_n,
+                    segment_m: Vec::from_slice(&segment_m).map_err(|_|ParseError::InsufficientBuffer)?
+                }
+            }
+        )
     }
 }
 
