@@ -18,6 +18,7 @@ pub enum ProvisioningPDU {
     Failed(Failed),
 }
 
+// TODO unify
 #[derive(Format)]
 pub enum ParseError {
     InvalidPDUFormat,
