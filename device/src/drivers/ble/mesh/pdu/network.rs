@@ -4,24 +4,41 @@ use crate::drivers::ble::mesh::pdu::{lower, ParseError};
 use crate::drivers::ble::mesh::MESH_MESSAGE;
 use heapless::Vec;
 
+pub enum PDU {
+    Unauthenticated(UnauthenticatedPDU),
+    Authenticated(AuthenticatedPDU),
+}
+
+pub struct UnauthenticatedPDU {
+    pub(crate) ivi: u8, /* 1 bit */
+    pub(crate) nid: u8, /* 7 bits */
+    // ctl: bool /* 1 bit */
+    pub(crate) ttl: u8,  /* 7 bits */
+    pub(crate) seq: u32, /* 24 bits */
+    pub(crate) src: [u8;2],
+    pub(crate) enc_dst: [u8;2],
+    pub(crate) enc_transport_pdu: Vec<u8, 16>,
+    pub(crate) net_mic: NetMic,
+}
+
 pub enum NetMic {
     Access([u8;4]),
     Control([u8;8]),
 }
 
-pub struct PDU {
-    ivi: u8, /* 1 bit */
-    nid: u8, /* 7 bits */
+pub struct AuthenticatedPDU {
+    pub(crate) ivi: u8, /* 1 bit */
+    pub(crate) nid: u8, /* 7 bits */
     // ctl: bool /* 1 bit */
-    ttl: u8,  /* 7 bits */
-    seq: u32, /* 24 bits */
-    src: UnicastAddress,
-    dst: Address,
-    transport_pdu: lower::PDU,
-    net_mic: NetMic,
+    pub(crate) ttl: u8,  /* 7 bits */
+    pub(crate) seq: u32, /* 24 bits */
+    pub(crate) src: UnicastAddress,
+    pub(crate) dst: Address,
+    pub(crate) transport_pdu: lower::PDU,
+    pub(crate) net_mic: NetMic,
 }
 
-impl PDU {
+impl AuthenticatedPDU {
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 11 {
             if data[1] != MESH_MESSAGE {

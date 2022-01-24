@@ -1,7 +1,8 @@
-use crate::drivers::ble::mesh::pdu::bearer::advertising::PDU;
+use crate::drivers::ble::mesh::pdu::bearer::advertising;
+use crate::drivers::ble::mesh::pdu::network;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
-use crate::drivers::ble::mesh::PB_ADV;
+use crate::drivers::ble::mesh::{MESH_MESSAGE, PB_ADV};
 use core::future::Future;
 
 pub trait MeshContext {
@@ -11,13 +12,14 @@ pub trait MeshContext {
     where
         Self: 'm;
 
-    fn transmit_pdu<'m>(&'m self, pdu: PDU) -> Self::TransmitFuture<'m>;
+    fn transmit_pdu<'m>(&'m self, pdu: advertising::PDU) -> Self::TransmitFuture<'m>;
 }
 
 pub struct Mesh {}
 
 pub enum MeshData {
-    Provisioning(PDU),
+    Provisioning(advertising::PDU),
+    Network(network::AuthenticatedPDU),
 }
 
 impl Default for Mesh {
@@ -36,7 +38,11 @@ impl Mesh {
         if data.len() >= 2 {
             if data[1] == PB_ADV {
                 Ok(Some(MeshData::Provisioning(
-                    PDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
+                    advertising::PDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
+                )))
+            } else if data[1] == MESH_MESSAGE {
+                Ok(Some(MeshData::Network(
+                    network::AuthenticatedPDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
                 )))
             } else {
                 Err(DeviceError::InvalidPacket)
@@ -49,7 +55,7 @@ impl Mesh {
     pub async fn process_outbound<C: MeshContext>(
         &mut self,
         ctx: &C,
-        pdu: PDU,
+        pdu: advertising::PDU,
     ) -> Result<(), DeviceError> {
         ctx.transmit_pdu(pdu).await
     }

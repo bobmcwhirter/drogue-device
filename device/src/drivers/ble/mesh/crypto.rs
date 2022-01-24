@@ -1,6 +1,6 @@
-use aes::{Aes128, NewBlockCipher};
+use aes::{Aes128, BlockEncrypt, NewBlockCipher};
 use ccm::aead::generic_array::GenericArray;
-use ccm::aead::NewAead;
+use ccm::aead::{AeadMutInPlace, NewAead};
 use ccm::aead::{AeadInPlace, Error};
 use ccm::consts::U13;
 use ccm::consts::U8;
@@ -8,6 +8,8 @@ use ccm::Ccm;
 use cmac::crypto_mac::{InvalidKeyLength, Output};
 use cmac::{Cmac, Mac, NewMac};
 use core::convert::TryInto;
+use core::iter::FromIterator;
+use aes::cipher::Block;
 use heapless::Vec;
 
 const ZERO: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -64,6 +66,24 @@ pub fn k2(n: &[u8], p: &[u8]) -> Result<(u8, [u8; 16], [u8; 16]), InvalidKeyLeng
     ))
 }
 
+pub fn e(key: &[u8], data: &[u8])  -> Result<[u8;16], InvalidKeyLength>{
+    if data.len() != 16 {
+        return Err(InvalidKeyLength)
+    }
+
+    let key = GenericArray::<u8, <Aes128 as NewBlockCipher>::KeySize>::from_slice(key);
+    let mut cipher = Aes128::new_from_slice(key).map_err(|_|InvalidKeyLength)?;
+
+
+    let mut block = [0;16];
+    for (i, b) in data.iter().enumerate() {
+        block[i] = *b
+    }
+    let mut cipher_block = Block::<Aes128>::from_mut_slice(&mut block);
+    cipher.encrypt_block( &mut cipher_block);
+    Ok(block)
+}
+
 type AesCcm = Ccm<Aes128, U8, U13>;
 
 pub fn aes_ccm_decrypt(key: &[u8], nonce: &[u8], data: &mut [u8], mic: &[u8]) -> Result<(), Error> {
@@ -71,3 +91,5 @@ pub fn aes_ccm_decrypt(key: &[u8], nonce: &[u8], data: &mut [u8], mic: &[u8]) ->
     let ccm = AesCcm::new(&key);
     ccm.decrypt_in_place_detached(nonce.into(), &[], data, mic.into())
 }
+
+

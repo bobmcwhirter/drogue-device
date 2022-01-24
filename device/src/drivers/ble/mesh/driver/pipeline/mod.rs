@@ -10,14 +10,15 @@ use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::generic_provisioning::Reason;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 
-pub mod unprovisioned;
-
 pub mod mesh;
+pub mod provisioned;
+pub mod unprovisioned;
 
 pub trait PipelineContext: ProvisionableContext {}
 
 pub struct Pipeline {
     mesh: Mesh,
+    // unprovisioned pipeline
     provisioning_bearer: ProvisioningBearer,
     provisionable: Provisionable,
 }
@@ -74,6 +75,9 @@ impl Pipeline {
                     } else {
                         Ok(None)
                     }
+                }
+                MeshData::Network(pdu) => {
+                    Ok(None)
                 }
             }
         } else {
