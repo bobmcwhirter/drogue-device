@@ -1,9 +1,9 @@
 use crate::drivers::ble::mesh::pdu::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
-use crate::drivers::ble::mesh::driver::pipeline::segmentation::outbound::{
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::segmentation::outbound::{
     OutboundSegments, OutboundSegmentsIter,
 };
-use crate::drivers::ble::mesh::driver::pipeline::segmentation::Segmentation;
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::segmentation::Segmentation;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::generic_provisioning::{
     GenericProvisioningPDU, ProvisioningBearerControl, Reason,

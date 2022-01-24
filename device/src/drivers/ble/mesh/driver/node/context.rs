@@ -3,7 +3,7 @@ use crate::drivers::ble::mesh::crypto;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::node::{Node, Receiver, Transmitter};
 use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
-use crate::drivers::ble::mesh::driver::pipeline::provisionable::ProvisionableContext;
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisionable::ProvisionableContext;
 use crate::drivers::ble::mesh::driver::pipeline::PipelineContext;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;

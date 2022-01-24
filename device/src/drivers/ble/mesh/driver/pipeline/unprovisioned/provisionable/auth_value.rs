@@ -1,4 +1,4 @@
-use crate::drivers::ble::mesh::driver::pipeline::provisionable::ProvisionableContext;
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisionable::ProvisionableContext;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::{
     InputOOBAction, OOBAction, OOBSize, OutputOOBAction, Start,

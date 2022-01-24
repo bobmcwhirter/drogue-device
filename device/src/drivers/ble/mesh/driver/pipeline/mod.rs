@@ -1,19 +1,18 @@
 use crate::drivers::ble::mesh::driver::node::State;
 use crate::drivers::ble::mesh::driver::pipeline::mesh::{Mesh, MeshData};
-use crate::drivers::ble::mesh::driver::pipeline::provisionable::{
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisionable::{
     Provisionable, ProvisionableContext,
 };
-use crate::drivers::ble::mesh::driver::pipeline::provisioning_bearer::{
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisioning_bearer::{
     BearerMessage, ProvisioningBearer,
 };
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::generic_provisioning::Reason;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 
+pub mod unprovisioned;
+
 pub mod mesh;
-pub mod provisionable;
-pub mod provisioning_bearer;
-pub mod segmentation;
 
 pub trait PipelineContext: ProvisionableContext {}
 

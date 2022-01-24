@@ -2,10 +2,10 @@ mod auth_value;
 mod transcript;
 
 use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
-use crate::drivers::ble::mesh::driver::pipeline::provisionable::auth_value::{
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisionable::auth_value::{
     determine_auth_value, AuthValue,
 };
-use crate::drivers::ble::mesh::driver::pipeline::provisionable::transcript::Transcript;
+use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisionable::transcript::Transcript;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::{
     Capabilities, Confirmation, ProvisioningData, ProvisioningPDU, PublicKey, Random,

@@ -1,3 +1,4 @@
+use crate::drivers::ble::mesh::pdu::ParseError;
 
 pub enum AccessMessage {
     Config(Config),
@@ -9,6 +10,19 @@ impl AccessMessage {
         match self {
             AccessMessage::Config(inner) => inner.opcode(),
             AccessMessage::Health(inner) => inner.opcode(),
+        }
+    }
+
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
+        let (opcode, parameters) = Opcode::split(data).ok_or(ParseError::InvalidPDUFormat)?;
+        match opcode {
+            CONFIG_NODE_RESET => Ok(Self::Config(Config::NodeReset(NodeReset::parse_reset(
+                parameters,
+            )?))),
+            CONFIG_NODE_RESET_STATUS => Ok(Self::Config(Config::NodeReset(
+                NodeReset::parse_status(parameters)?,
+            ))),
+            _ => unimplemented!(),
         }
     }
 }
@@ -178,7 +192,7 @@ impl HeartbeatPublication {
 pub enum HeartbeatSubscription {
     Get,
     Set,
-    Status
+    Status,
 }
 
 impl HeartbeatSubscription {
@@ -186,7 +200,7 @@ impl HeartbeatSubscription {
         match self {
             Self::Get => CONFIG_HEARTBEAT_SUBSCRIPTION_GET,
             Self::Set => CONFIG_HEARTBEAT_SUBSCRIPTION_SET,
-            Self::Status => CONFIG_HEARTBEAT_SUBSCRIPTION_STATUS
+            Self::Status => CONFIG_HEARTBEAT_SUBSCRIPTION_STATUS,
         }
     }
 }
@@ -361,6 +375,22 @@ impl NodeReset {
             Self::Status => CONFIG_NODE_RESET_STATUS,
         }
     }
+
+    fn parse_reset(parameters: &[u8]) -> Result<Self, ParseError> {
+        if parameters.is_empty() {
+            Ok(Self::Reset)
+        } else {
+            Err(ParseError::InvalidLength)
+        }
+    }
+
+    fn parse_status(parameters: &[u8]) -> Result<Self, ParseError> {
+        if parameters.is_empty() {
+            Ok(Self::Status)
+        } else {
+            Err(ParseError::InvalidLength)
+        }
+    }
 }
 
 pub enum Relay {
@@ -423,7 +453,7 @@ impl SIGModelSubscription {
 
 pub enum VendorModel {
     App(VendorModelApp),
-    Susbcription(VendorModelSubscription)
+    Susbcription(VendorModelSubscription),
 }
 
 impl VendorModel {
@@ -467,7 +497,7 @@ pub enum Health {
     Attention(Attention),
     CurrentStatus,
     Fault(Fault),
-    Period(Period)
+    Period(Period),
 }
 
 impl Health {
@@ -537,10 +567,56 @@ impl Period {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub enum Opcode {
     OneOctet(u8),
     TwoOctet(u8, u8),
     ThreeOctet(u8, u8, u8),
+}
+
+impl Opcode {
+    pub fn matches(&self, data: &[u8]) -> bool {
+        match self {
+            Opcode::OneOctet(a) if data.len() >= 1 && data[0] == *a => true,
+            Opcode::TwoOctet(a, b) if data.len() >= 2 && data[0] == *a && data[1] == *b => true,
+            Opcode::ThreeOctet(a, b, c)
+                if data.len() >= 3 && data[0] == *a && data[1] == *b && data[2] == *b =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn opcode_len(&self) -> usize {
+        match self {
+            Opcode::OneOctet(_) => 1,
+            Opcode::TwoOctet(_, _) => 2,
+            Opcode::ThreeOctet(_, _, _) => 3,
+        }
+    }
+
+    pub fn split(data: &[u8]) -> Option<(Opcode, &[u8])> {
+        if data.is_empty() {
+            None
+        } else {
+            if data[0] & 0b10000000 == 0 {
+                // one octet
+                Some((Opcode::OneOctet(data[0] & 0b00111111), &data[1..]))
+            } else if data.len() >= 2 && data[0] & 0b11000000 == 0b01000000 {
+                // two octet
+                Some((Opcode::TwoOctet(data[0] & 0b00111111, data[1]), &data[2..]))
+            } else if data.len() >= 3 && data[0] & 0b11000000 == 0b11000000 {
+                // three octet
+                Some((
+                    Opcode::ThreeOctet(data[0] & 0b00111111, data[1], data[2]),
+                    &data[3..],
+                ))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 macro_rules! opcode {
