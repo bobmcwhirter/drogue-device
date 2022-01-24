@@ -1,4 +1,4 @@
-use crate::drivers::ble::mesh::bearer::advertising::PDU;
+use crate::drivers::ble::mesh::pdu::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::PB_ADV;

@@ -1,4 +1,4 @@
-use crate::drivers::ble::mesh::bearer::advertising::PDU;
+use crate::drivers::ble::mesh::pdu::bearer::advertising::PDU;
 use crate::drivers::ble::mesh::driver::pipeline::mesh::MeshContext;
 use crate::drivers::ble::mesh::driver::pipeline::segmentation::outbound::{
     OutboundSegments, OutboundSegmentsIter,
