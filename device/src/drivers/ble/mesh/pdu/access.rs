@@ -4,6 +4,15 @@ pub enum AccessMessage {
     Health(Health),
 }
 
+impl AccessMessage {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            AccessMessage::Config(inner) => inner.opcode(),
+            AccessMessage::Health(inner) => inner.opcode(),
+        }
+    }
+}
+
 pub enum Config {
     AppKey(AppKey),
     Beacon(Beacon),
@@ -25,6 +34,31 @@ pub enum Config {
     VendorModel(VendorModel),
 }
 
+impl Config {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::AppKey(inner) => inner.opcode(),
+            Self::Beacon(inner) => inner.opcode(),
+            Self::CompositionData(inner) => inner.opcode(),
+            Self::DefaultTTL(inner) => inner.opcode(),
+            Self::Friend(inner) => inner.opcode(),
+            Self::GATTProxy(inner) => inner.opcode(),
+            Self::HeartbeatPublication(inner) => inner.opcode(),
+            Self::HeartbeatSubscription(inner) => inner.opcode(),
+            Self::KeyRefreshPhase(inner) => inner.opcode(),
+            Self::LowPowerNodePollTimeout(inner) => inner.opcode(),
+            Self::Model(inner) => inner.opcode(),
+            Self::NetKey(inner) => inner.opcode(),
+            Self::NetworkTransmit(inner) => inner.opcode(),
+            Self::NodeIdentity(inner) => inner.opcode(),
+            Self::NodeReset(inner) => inner.opcode(),
+            Self::Relay(inner) => inner.opcode(),
+            Self::SIGModel(inner) => inner.opcode(),
+            Self::VendorModel(inner) => inner.opcode(),
+        }
+    }
+}
+
 pub enum AppKey {
     Add,
     Delete,
@@ -34,15 +68,47 @@ pub enum AppKey {
     Update,
 }
 
+impl AppKey {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Add => CONFIG_APPKEY_ADD,
+            Self::Delete => CONFIG_APPKEY_DELETE,
+            Self::Get => CONFIG_APPKEY_GET,
+            Self::List => CONFIG_APPKEY_LIST,
+            Self::Status => CONFIG_APPKEY_STATUS,
+            Self::Update => CONFIG_APPKEY_STATUS,
+        }
+    }
+}
+
 pub enum Beacon {
     Get,
     Set,
     Status,
 }
 
+impl Beacon {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_BEACON_GET,
+            Self::Set => CONFIG_BEACON_SET,
+            Self::Status => CONFIG_BEACON_STATUS,
+        }
+    }
+}
+
 pub enum CompositionData {
     Get,
     Status,
+}
+
+impl CompositionData {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_COMPOSITION_DATA_GET,
+            Self::Status => CONFIG_COMPOSITION_DATA_STATUS,
+        }
+    }
 }
 
 pub enum DefaultTTL {
@@ -51,10 +117,30 @@ pub enum DefaultTTL {
     Status,
 }
 
+impl DefaultTTL {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_DEFAULT_TTL_GET,
+            Self::Set => CONFIG_DEFAULT_TTL_SET,
+            Self::Status => CONFIG_DEFAULT_TTL_STATUS,
+        }
+    }
+}
+
 pub enum Friend {
     Get,
     Set,
     Status,
+}
+
+impl Friend {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_FRIEND_GET,
+            Self::Set => CONFIG_FRIEND_SET,
+            Self::Status => CONFIG_FRIEND_STATUS,
+        }
+    }
 }
 
 pub enum GATTProxy {
@@ -63,10 +149,30 @@ pub enum GATTProxy {
     Status,
 }
 
+impl GATTProxy {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_GATT_PROXY_GET,
+            Self::Set => CONFIG_GATT_PROXY_SET,
+            Self::Status => CONFIG_GATT_PROXY_STATUS,
+        }
+    }
+}
+
 pub enum HeartbeatPublication {
     Get,
     Set,
     Status,
+}
+
+impl HeartbeatPublication {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_HEARTBEAT_PUBLICATION_GET,
+            Self::Set => CONFIG_HEARTBEAT_PUBLICATION_SET,
+            Self::Status => CONFIG_HEARTBEAT_PUBLICATION_STATUS,
+        }
+    }
 }
 
 pub enum HeartbeatSubscription {
@@ -75,15 +181,44 @@ pub enum HeartbeatSubscription {
     Status
 }
 
+impl HeartbeatSubscription {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_HEARTBEAT_SUBSCRIPTION_GET,
+            Self::Set => CONFIG_HEARTBEAT_SUBSCRIPTION_SET,
+            Self::Status => CONFIG_HEARTBEAT_SUBSCRIPTION_STATUS
+        }
+    }
+}
+
 pub enum KeyRefreshPhase {
     Get,
     Set,
     Status,
 }
 
+impl KeyRefreshPhase {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_KEY_REFRESH_PHASE_GET,
+            Self::Set => CONFIG_KEY_REFRESH_PHASE_SET,
+            Self::Status => CONFIG_KEY_REFRESH_PHASE_STATUS,
+        }
+    }
+}
+
 pub enum LowPowerNodePollTimeout {
     Get,
     Status,
+}
+
+impl LowPowerNodePollTimeout {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_LOW_POWER_NODE_POLLTIMEOUT_GET,
+            Self::Status => CONFIG_LOW_POWER_NODE_POLLTIMEOUT_STATUS,
+        }
+    }
 }
 
 pub enum Model {
@@ -92,16 +227,46 @@ pub enum Model {
     Subscription(ModelSubscription),
 }
 
+impl Model {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::App(inner) => inner.opcode(),
+            Self::Publication(inner) => inner.opcode(),
+            Self::Subscription(inner) => inner.opcode(),
+        }
+    }
+}
+
 pub enum ModelApp {
     Bind,
     Status,
     Unbind,
 }
 
+impl ModelApp {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Bind => CONFIG_MODEL_APP_BIND,
+            Self::Status => CONFIG_MODEL_APP_STATUS,
+            Self::Unbind => CONFIG_MODEL_APP_UNBIND,
+        }
+    }
+}
+
 pub enum ModelPublication {
     Get,
     Status,
     VirtualAddressSet,
+}
+
+impl ModelPublication {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_MODEL_PUBLICATION_GET,
+            Self::Status => CONFIG_MODEL_PUBLICATION_STATUS,
+            Self::VirtualAddressSet => CONFIG_MODEL_PUBLICATION_VIRTUAL_ADDRESS_SET,
+        }
+    }
 }
 
 pub enum ModelSubscription {
@@ -115,6 +280,21 @@ pub enum ModelSubscription {
     VirtualAddressOverwrite,
 }
 
+impl ModelSubscription {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Add => CONFIG_MODEL_SUBSCRIPTION_ADD,
+            Self::Delete => CONFIG_MODEL_SUBSCRIPTION_DELETE,
+            Self::DeleteAll => CONFIG_MODEL_SUBSCRIPTION_DELETE_ALL,
+            Self::Overwrite => CONFIG_MODEL_SUBSCRIPTION_OVERWRITE,
+            Self::Status => CONFIG_MODEL_SUBSCRIPTION_STATUS,
+            Self::VirtualAddressAdd => CONFIG_MODEL_SUBSCRIPTION_VIRTUAL_ADDRESS_ADD,
+            Self::VirtualAddressDelete => CONFIG_MODEL_SUBSCRIPTION_VIRTUAL_ADDRESS_DELETE,
+            Self::VirtualAddressOverwrite => CONFIG_MODEL_SUBSCRIPTION_VIRTUAL_ADDRESS_OVERWRITE,
+        }
+    }
+}
+
 pub enum NetKey {
     Add,
     Delete,
@@ -124,10 +304,33 @@ pub enum NetKey {
     Update,
 }
 
+impl NetKey {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Add => CONFIG_NETKEY_ADD,
+            Self::Delete => CONFIG_NETKEY_DELETE,
+            Self::Get => CONFIG_NETKEY_GET,
+            Self::List => CONFIG_NETKEY_LIST,
+            Self::Status => CONFIG_NETKEY_STATUS,
+            Self::Update => CONFIG_NETKEY_UPDATE,
+        }
+    }
+}
+
 pub enum NetworkTransmit {
     Get,
     Set,
     Status,
+}
+
+impl NetworkTransmit {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_NETWORK_TRANSMIT_GET,
+            Self::Set => CONFIG_NETWORK_TRANSMIT_SET,
+            Self::Status => CONFIG_NETWORK_TRANSMIT_STATUS,
+        }
+    }
 }
 
 pub enum NodeIdentity {
@@ -136,9 +339,28 @@ pub enum NodeIdentity {
     Status,
 }
 
+impl NodeIdentity {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_NODE_IDENTITY_GET,
+            Self::Set => CONFIG_NODE_IDENTITY_SET,
+            Self::Status => CONFIG_NODE_IDENTITY_STATUS,
+        }
+    }
+}
+
 pub enum NodeReset {
     Reset,
     Status,
+}
+
+impl NodeReset {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Reset => CONFIG_NODE_RESET,
+            Self::Status => CONFIG_NODE_RESET_STATUS,
+        }
+    }
 }
 
 pub enum Relay {
@@ -147,9 +369,28 @@ pub enum Relay {
     Status,
 }
 
+impl Relay {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_RELAY_GET,
+            Self::Set => CONFIG_RELAY_SET,
+            Self::Status => CONFIG_RELAY_STATUS,
+        }
+    }
+}
+
 pub enum SIGModel {
     App(SIGModelApp),
     Subscription(SIGModelSubscription),
+}
+
+impl SIGModel {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::App(inner) => inner.opcode(),
+            Self::Subscription(inner) => inner.opcode(),
+        }
+    }
 }
 
 pub enum SIGModelApp {
@@ -157,9 +398,27 @@ pub enum SIGModelApp {
     List,
 }
 
+impl SIGModelApp {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_SIG_MODEL_APP_GET,
+            Self::List => CONFIG_SIG_MODEL_APP_LIST,
+        }
+    }
+}
+
 pub enum SIGModelSubscription {
     Get,
     List,
+}
+
+impl SIGModelSubscription {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_SIG_MODEL_SUBSCRIPTION_GET,
+            Self::List => CONFIG_SIG_MODEL_SUBSCRIPTION_LIST,
+        }
+    }
 }
 
 pub enum VendorModel {
@@ -167,14 +426,41 @@ pub enum VendorModel {
     Susbcription(VendorModelSubscription)
 }
 
+impl VendorModel {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::App(inner) => inner.opcode(),
+            Self::Susbcription(inner) => inner.opcode(),
+        }
+    }
+}
+
 pub enum VendorModelApp {
     Get,
     List,
 }
 
+impl VendorModelApp {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_VENDOR_MODEL_APP_GET,
+            Self::List => CONFIG_VENDOR_MODEL_APP_LIST,
+        }
+    }
+}
+
 pub enum VendorModelSubscription {
     Get,
     List,
+}
+
+impl VendorModelSubscription {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => CONFIG_VENDOR_MODEL_SUBSCRIPTION_GET,
+            Self::List => CONFIG_VENDOR_MODEL_SUBSCRIPTION_LIST,
+        }
+    }
 }
 
 pub enum Health {
@@ -184,10 +470,31 @@ pub enum Health {
     Period(Period)
 }
 
+impl Health {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::CurrentStatus => HEALTH_CURRENT_STATUS,
+            Self::Attention(inner) => inner.opcode(),
+            Self::Fault(inner) => inner.opcode(),
+            Self::Period(inner) => inner.opcode(),
+        }
+    }
+}
+
 pub enum Attention {
     Get,
     Set,
     SetUnacknowledged,
+}
+
+impl Attention {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => HEALTH_ATTENTION_GET,
+            Self::Set => HEALTH_ATTENTION_SET,
+            Self::SetUnacknowledged => HEALTH_ATTENTION_SET_UNACKNOWLEDGED,
+        }
+    }
 }
 
 pub enum Fault {
@@ -199,6 +506,19 @@ pub enum Fault {
     TestUnacknowledged,
 }
 
+impl Fault {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Clear => HEALTH_FAULT_CLEAR,
+            Self::ClearUnacknowledged => HEALTH_FAULT_CLEAR_UNACKNOWLEDGED,
+            Self::Get => HEALTH_FAULT_GET,
+            Self::Status => HEALTH_FAULT_STATUS,
+            Self::Test => HEALTH_FAULT_TEST,
+            Self::TestUnacknowledged => HEALTH_FAULT_TEST_UNACKNOWLEDGED,
+        }
+    }
+}
+
 pub enum Period {
     Get,
     Set,
@@ -206,6 +526,16 @@ pub enum Period {
     Status,
 }
 
+impl Period {
+    pub fn opcode(&self) -> Opcode {
+        match self {
+            Self::Get => HEALTH_PERIOD_GET,
+            Self::Set => HEALTH_PERIOD_SET,
+            Self::SetUnacknowledged => HEALTH_PERIOD_SET_UNACKNOWLEDGED,
+            Self::Status => HEALTH_PERIOD_STATUS,
+        }
+    }
+}
 
 pub enum Opcode {
     OneOctet(u8),
