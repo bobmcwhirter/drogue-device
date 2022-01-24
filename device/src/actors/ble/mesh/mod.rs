@@ -1,11 +1,11 @@
-pub mod transport;
+pub mod bearer;
 
 use crate::drivers::ble::mesh::configuration_manager::ConfigurationManager;
 use crate::drivers::ble::mesh::driver::node::{Node, Receiver, Transmitter};
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 use crate::drivers::ble::mesh::storage::Storage;
-use crate::drivers::ble::mesh::transport::{Handler, Transport};
+use crate::drivers::ble::mesh::bearer::{Handler, Bearer};
 use crate::drivers::ble::mesh::vault::Vault;
 use crate::{Actor, Address, Inbox};
 use core::cell::RefCell;
@@ -18,7 +18,7 @@ use rand_core::{CryptoRng, RngCore};
 
 pub struct MeshNode<T, S, R>
 where
-    T: Transport,
+    T: Bearer,
     S: Storage,
     R: RngCore + CryptoRng,
 {
@@ -31,7 +31,7 @@ where
 
 impl<T, S, R> MeshNode<T, S, R>
 where
-    T: Transport,
+    T: Bearer,
     S: Storage,
     R: RngCore + CryptoRng,
 {
@@ -84,7 +84,7 @@ impl<'c> Receiver for TransportReceiver<'c> {
 
 struct TransportHandler<'t, 'c, T>
 where
-    T: Transport + 't,
+    T: Bearer + 't,
 {
     transport: &'t T,
     sender: mpsc::Sender<'c, CriticalSection, Vec<u8, 384>, 6>,
@@ -92,7 +92,7 @@ where
 
 impl<'t, 'c, T> TransportHandler<'t, 'c, T>
 where
-    T: Transport + 't,
+    T: Bearer + 't,
 {
     fn new(transport: &'t T, sender: mpsc::Sender<'c, CriticalSection, Vec<u8, 384>, 6>) -> Self {
         Self { transport, sender }
@@ -105,7 +105,7 @@ where
 
 impl<'t, 'c, T> Handler for TransportHandler<'t, 'c, T>
 where
-    T: Transport + 't,
+    T: Bearer + 't,
 {
     fn handle(&self, message: Vec<u8, 384>) {
         // BLE loses messages anyhow, so if this fails, just ignore.
@@ -115,14 +115,14 @@ where
 
 struct TransportTransmitter<'t, T>
 where
-    T: Transport + 't,
+    T: Bearer + 't,
 {
     transport: &'t T,
 }
 
 impl<'t, T> Transmitter for TransportTransmitter<'t, T>
 where
-    T: Transport + 't,
+    T: Bearer + 't,
 {
     type TransmitFuture<'m>
     where
@@ -139,7 +139,7 @@ where
 
 impl<T, S, R> Actor for MeshNode<T, S, R>
 where
-    T: Transport + 'static,
+    T: Bearer + 'static,
     S: Storage + 'static,
     R: RngCore + CryptoRng + 'static,
 {

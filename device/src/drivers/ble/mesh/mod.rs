@@ -15,7 +15,7 @@ pub mod pdu;
 pub mod provisioning;
 pub mod status;
 pub mod storage;
-pub mod transport;
+pub mod bearer;
 pub mod vault;
 
 pub struct InsufficientBuffer;
