@@ -80,7 +80,7 @@ impl PDU {
     fn parse_segmented_access(data: &[u8]) -> Result<Access, ParseError> {
         let akf = data[0] & 0b01000000 != 0;
         let aid = data[0] & 0b00111111;
-        let szmic = data[1] & 0b1000000 != 0;
+        let szmic = SzMic::parse(data[1] & 0b1000000);
         let seq_zero = u16::from_be_bytes([ data[1] & 0b01111111, data[2] & 0b11111100 ]) >> 2;
         let seg_o = (u16::from_be_bytes( [ data[2] & 0b00000011, data[3] & 0b11100000 ] ) >> 5) as u8;
         let seg_n = data[3] & 0b00011111;
@@ -113,10 +113,25 @@ pub struct Control {
     message: ControlMessage,
 }
 
+pub enum SzMic {
+    Bit32,
+    Bit64,
+}
+
+impl SzMic {
+    pub fn parse(data: u8) -> Self {
+        if data != 0 {
+            Self::Bit64
+        } else {
+            Self::Bit32
+        }
+    }
+}
+
 pub enum AccessMessage {
     Unsegmented(Vec<u8, 15>),
     Segmented {
-        szmic: bool,
+        szmic: SzMic,
         seq_zero: u16,
         seg_o: u8,
         seg_n: u8,

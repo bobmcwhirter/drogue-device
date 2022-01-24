@@ -1,3 +1,212 @@
+
+pub enum AccessMessage {
+    Config(Config),
+    Health(Health),
+}
+
+pub enum Config {
+    AppKey(AppKey),
+    Beacon(Beacon),
+    CompositionData(CompositionData),
+    DefaultTTL(DefaultTTL),
+    Friend(Friend),
+    GATTProxy(GATTProxy),
+    HeartbeatPublication(HeartbeatPublication),
+    HeartbeatSubscription(HeartbeatSubscription),
+    KeyRefreshPhase(KeyRefreshPhase),
+    LowPowerNodePollTimeout(LowPowerNodePollTimeout),
+    Model(Model),
+    NetKey(NetKey),
+    NetworkTransmit(NetworkTransmit),
+    NodeIdentity(NodeIdentity),
+    NodeReset(NodeReset),
+    Relay(Relay),
+    SIGModel(SIGModel),
+    VendorModel(VendorModel),
+}
+
+pub enum AppKey {
+    Add,
+    Delete,
+    Get,
+    List,
+    Status,
+    Update,
+}
+
+pub enum Beacon {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum CompositionData {
+    Get,
+    Status,
+}
+
+pub enum DefaultTTL {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum Friend {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum GATTProxy {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum HeartbeatPublication {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum HeartbeatSubscription {
+    Get,
+    Set,
+    Status
+}
+
+pub enum KeyRefreshPhase {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum LowPowerNodePollTimeout {
+    Get,
+    Status,
+}
+
+pub enum Model {
+    App(ModelApp),
+    Publication(ModelPublication),
+    Subscription(ModelSubscription),
+}
+
+pub enum ModelApp {
+    Bind,
+    Status,
+    Unbind,
+}
+
+pub enum ModelPublication {
+    Get,
+    Status,
+    VirtualAddressSet,
+}
+
+pub enum ModelSubscription {
+    Add,
+    Delete,
+    DeleteAll,
+    Overwrite,
+    Status,
+    VirtualAddressAdd,
+    VirtualAddressDelete,
+    VirtualAddressOverwrite,
+}
+
+pub enum NetKey {
+    Add,
+    Delete,
+    Get,
+    List,
+    Status,
+    Update,
+}
+
+pub enum NetworkTransmit {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum NodeIdentity {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum NodeReset {
+    Reset,
+    Status,
+}
+
+pub enum Relay {
+    Get,
+    Set,
+    Status,
+}
+
+pub enum SIGModel {
+    App(SIGModelApp),
+    Subscription(SIGModelSubscription),
+}
+
+pub enum SIGModelApp {
+    Get,
+    List,
+}
+
+pub enum SIGModelSubscription {
+    Get,
+    List,
+}
+
+pub enum VendorModel {
+    App(VendorModelApp),
+    Susbcription(VendorModelSubscription)
+}
+
+pub enum VendorModelApp {
+    Get,
+    List,
+}
+
+pub enum VendorModelSubscription {
+    Get,
+    List,
+}
+
+pub enum Health {
+    Attention(Attention),
+    CurrentStatus,
+    Fault(Fault),
+    Period(Period)
+}
+
+pub enum Attention {
+    Get,
+    Set,
+    SetUnacknowledged,
+}
+
+pub enum Fault {
+    Clear,
+    ClearUnacknowledged,
+    Get,
+    Status,
+    Test,
+    TestUnacknowledged,
+}
+
+pub enum Period {
+    Get,
+    Set,
+    SetUnacknowledged,
+    Status,
+}
+
+
 pub enum Opcode {
     OneOctet(u8),
     TwoOctet(u8, u8),
