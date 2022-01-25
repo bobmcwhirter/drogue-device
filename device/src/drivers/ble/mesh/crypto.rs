@@ -66,22 +66,13 @@ pub fn k2(n: &[u8], p: &[u8]) -> Result<(u8, [u8; 16], [u8; 16]), InvalidKeyLeng
     ))
 }
 
-pub fn e(key: &[u8], data: &[u8])  -> Result<[u8;16], InvalidKeyLength>{
-    if data.len() != 16 {
-        return Err(InvalidKeyLength)
-    }
-
+pub fn e(key: &[u8], mut data: [u8;16])  -> Result<[u8;16], InvalidKeyLength>{
     let key = GenericArray::<u8, <Aes128 as NewBlockCipher>::KeySize>::from_slice(key);
     let mut cipher = Aes128::new_from_slice(key).map_err(|_|InvalidKeyLength)?;
 
-
-    let mut block = [0;16];
-    for (i, b) in data.iter().enumerate() {
-        block[i] = *b
-    }
-    let mut cipher_block = Block::<Aes128>::from_mut_slice(&mut block);
+    let mut cipher_block = Block::<Aes128>::from_mut_slice(&mut data);
     cipher.encrypt_block( &mut cipher_block);
-    Ok(block)
+    Ok(data)
 }
 
 type AesCcm = Ccm<Aes128, U8, U13>;

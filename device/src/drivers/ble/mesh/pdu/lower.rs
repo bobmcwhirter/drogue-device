@@ -1,7 +1,9 @@
+use defmt::Format;
 use crate::drivers::ble::mesh::app::ApplicationKeyIdentifier;
 use crate::drivers::ble::mesh::pdu::ParseError;
 use heapless::Vec;
 
+#[derive(Clone, Format)]
 pub enum PDU {
     Access(Access),
     Control(Control),
@@ -102,17 +104,20 @@ impl PDU {
     }
 }
 
+#[derive(Clone, Format)]
 pub struct Access {
     akf: bool,
     aid: ApplicationKeyIdentifier,
     message: AccessMessage,
 }
 
+#[derive(Clone, Format)]
 pub struct Control {
     opcode: Opcode,
     message: ControlMessage,
 }
 
+#[derive(Copy, Clone, Format)]
 pub enum SzMic {
     Bit32,
     Bit64,
@@ -128,6 +133,7 @@ impl SzMic {
     }
 }
 
+#[derive(Clone, Format)]
 pub enum AccessMessage {
     Unsegmented(Vec<u8, 15>),
     Segmented {
@@ -139,6 +145,7 @@ pub enum AccessMessage {
     },
 }
 
+#[derive(Clone, Format)]
 pub enum ControlMessage {
     Unsegmented {
         parameters: Vec<u8, 11>,
@@ -151,6 +158,7 @@ pub enum ControlMessage {
     },
 }
 
+#[derive(Clone, Format)]
 pub enum Opcode {
     Reserved = 0x00,
     FriendPoll = 0x01,

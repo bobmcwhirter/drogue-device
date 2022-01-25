@@ -5,25 +5,45 @@ use crate::drivers::ble::mesh::MESH_MESSAGE;
 use heapless::Vec;
 
 pub enum PDU {
-    Unauthenticated(UnauthenticatedPDU),
+    ObfuscatedAndEncrypted(ObfuscatedAndEncryptedPDU),
     Authenticated(AuthenticatedPDU),
-}
-
-pub struct UnauthenticatedPDU {
-    pub(crate) ivi: u8, /* 1 bit */
-    pub(crate) nid: u8, /* 7 bits */
-    // ctl: bool /* 1 bit */
-    pub(crate) ttl: u8,  /* 7 bits */
-    pub(crate) seq: u32, /* 24 bits */
-    pub(crate) src: [u8;2],
-    pub(crate) enc_dst: [u8;2],
-    pub(crate) enc_transport_pdu: Vec<u8, 16>,
-    pub(crate) net_mic: NetMic,
 }
 
 pub enum NetMic {
     Access([u8;4]),
     Control([u8;8]),
+}
+
+pub struct ObfuscatedAndEncryptedPDU {
+    pub(crate) ivi: u8, /* 1 bit */
+    pub(crate) nid: u8, /* 7 bits */
+    pub(crate) obfuscated: [u8;6],
+    pub(crate) encrypted_and_mic: Vec<u8, 28>,
+}
+
+impl ObfuscatedAndEncryptedPDU {
+    pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
+        let ivi_nid = data[0];
+        let ivi = ivi_nid & 0b10000000 >> 7;
+        let nid = ivi_nid & 0b01111111;
+        let obfuscated =  [
+            data[1],
+            data[2],
+            data[3],
+            data[4],
+            data[5],
+            data[6],
+        ];
+
+        let encrypted_and_mic = Vec::from_slice( &data[7..] ).map_err(|_|ParseError::InsufficientBuffer)?;
+
+        Ok(Self{
+            ivi,
+            nid,
+            obfuscated,
+            encrypted_and_mic,
+        })
+    }
 }
 
 pub struct AuthenticatedPDU {
@@ -35,10 +55,11 @@ pub struct AuthenticatedPDU {
     pub(crate) src: UnicastAddress,
     pub(crate) dst: Address,
     pub(crate) transport_pdu: lower::PDU,
-    pub(crate) net_mic: NetMic,
+    //pub(crate) net_mic: NetMic,
 }
 
 impl AuthenticatedPDU {
+    /*
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 11 {
             if data[1] != MESH_MESSAGE {
@@ -74,11 +95,12 @@ impl AuthenticatedPDU {
                     src,
                     dst,
                     transport_pdu,
-                    net_mic,
+                    //net_mic,
                 })
             }
         } else {
             Err(ParseError::InvalidPDUFormat)
         }
     }
+     */
 }

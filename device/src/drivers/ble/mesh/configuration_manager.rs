@@ -50,11 +50,11 @@ pub struct Keys {
     random: Option<[u8; 16]>,
     private_key: Option<[u8; 32]>,
     shared_secret: Option<[u8; 32]>,
-    network: Option<Network>,
+    network: Option<NetworkInfo>,
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone, Default, Format)]
-pub struct Network {
+pub struct NetworkInfo {
     pub(crate) network_key: [u8; 16],
     pub(crate) key_index: u16,
     pub(crate) key_refresh_flag: KeyRefreshFlag,
@@ -129,11 +129,11 @@ impl Keys {
         Ok(())
     }
 
-    pub(crate) fn network(&self) -> Option<Network> {
+    pub(crate) fn network(&self) -> Option<NetworkInfo> {
         self.network
     }
 
-    pub(crate) fn set_network(&mut self, network: &Network) -> Result<(), ()> {
+    pub(crate) fn set_network(&mut self, network: &NetworkInfo) -> Result<(), ()> {
         self.network.replace(*network);
         Ok(())
     }

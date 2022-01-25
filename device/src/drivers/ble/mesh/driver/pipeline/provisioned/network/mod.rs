@@ -1,5 +1,7 @@
-mod network_message_cache;
-mod obfuscation;
+pub mod network_message_cache;
+pub mod authentication;
+pub mod relay;
+
 
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::pdu::{lower, network};

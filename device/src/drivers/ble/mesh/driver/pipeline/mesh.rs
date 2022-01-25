@@ -1,5 +1,5 @@
 use crate::drivers::ble::mesh::pdu::bearer::advertising;
-use crate::drivers::ble::mesh::pdu::network;
+use crate::drivers::ble::mesh::pdu::{network, ParseError};
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::{MESH_MESSAGE, PB_ADV};
@@ -19,7 +19,7 @@ pub struct Mesh {}
 
 pub enum MeshData {
     Provisioning(advertising::PDU),
-    Network(network::AuthenticatedPDU),
+    Network(network::ObfuscatedAndEncryptedPDU),
 }
 
 impl Default for Mesh {
@@ -41,9 +41,14 @@ impl Mesh {
                     advertising::PDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
                 )))
             } else if data[1] == MESH_MESSAGE {
-                Ok(Some(MeshData::Network(
-                    network::AuthenticatedPDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
-                )))
+                let len = data[0] as usize;
+                if data.len() >= len+1 {
+                    Ok(Some(MeshData::Network(
+                        network::ObfuscatedAndEncryptedPDU::parse(&data[2..2+len-1]).map_err(|_| DeviceError::InvalidPacket)?,
+                    )))
+                } else {
+                    Err(DeviceError::ParseError(ParseError::InvalidLength))
+                }
             } else {
                 Err(DeviceError::InvalidPacket)
             }

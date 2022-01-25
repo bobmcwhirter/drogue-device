@@ -7,6 +7,8 @@ use crate::drivers::ble::mesh::driver::pipeline::unprovisioned::provisioning_bea
     BearerMessage, ProvisioningBearer,
 };
 use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::driver::pipeline::provisioned::network::authentication::Authentication;
+use crate::drivers::ble::mesh::driver::pipeline::provisioned::network::relay::Relay;
 use crate::drivers::ble::mesh::generic_provisioning::Reason;
 use crate::drivers::ble::mesh::provisioning::Capabilities;
 
@@ -21,6 +23,9 @@ pub struct Pipeline {
     // unprovisioned pipeline
     provisioning_bearer: ProvisioningBearer,
     provisionable: Provisionable,
+    // provisioned pipeline
+    authentication: Authentication,
+    relay: Relay,
 }
 
 impl Pipeline {
@@ -29,6 +34,9 @@ impl Pipeline {
             mesh: Default::default(),
             provisioning_bearer: Default::default(),
             provisionable: Provisionable::new(capabilities),
+            //
+            authentication: Default::default(),
+            relay: Default::default(),
         }
     }
 

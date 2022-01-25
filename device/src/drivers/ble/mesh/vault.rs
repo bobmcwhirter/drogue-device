@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use crate::drivers::ble::mesh::configuration_manager::{GeneralStorage, KeyStorage, Network};
+use crate::drivers::ble::mesh::configuration_manager::{GeneralStorage, KeyStorage, NetworkInfo};
 use crate::drivers::ble::mesh::crypto;
 use aes::Aes128;
 use cmac::crypto_mac::Output;
@@ -135,7 +135,7 @@ impl<'s, S: GeneralStorage + KeyStorage> Vault for StorageVault<'s, S> {
             let (nid, encryption_key, privacy_key) = crypto::k2(&data.network_key, &[0x00])
                 .map_err(|_| DeviceError::KeyInitialization)?;
 
-            let update = Network {
+            let update = NetworkInfo {
                 network_key: data.network_key,
                 key_index: data.key_index,
                 key_refresh_flag: data.key_refresh_flag,

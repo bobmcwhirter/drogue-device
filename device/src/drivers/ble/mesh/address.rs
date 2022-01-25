@@ -1,3 +1,6 @@
+use defmt::Format;
+
+#[derive(Copy, Clone, Format)]
 pub enum Address {
     Unassigned,
     Unicast(UnicastAddress),
@@ -5,10 +8,16 @@ pub enum Address {
     Group(GroupAddress),
 }
 
+#[derive(Copy, Clone, Format)]
 pub struct InvalidAddress;
 
+#[derive(Copy, Clone, Format)]
 pub struct UnicastAddress([u8; 2]);
+
+#[derive(Copy, Clone, Format)]
 pub struct VirtualAddress([u8; 2]);
+
+#[derive(Copy, Clone, Format)]
 pub struct GroupAddress([u8; 2]);
 
 impl UnicastAddress {
