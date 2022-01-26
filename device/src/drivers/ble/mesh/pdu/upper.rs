@@ -15,6 +15,6 @@ pub enum TransMIC {
 }
 
 pub struct Access {
-    payload: Vec<u8, 380>,
-    transmit: TransMIC,
+    pub(crate) payload: Vec<u8, 380>,
+    pub(crate) trans_mic: TransMIC,
 }

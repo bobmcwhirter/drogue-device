@@ -1,4 +1,5 @@
 use core::convert::TryInto;
+use defmt::Format;
 use crate::drivers::ble::mesh::address::{Address, UnicastAddress};
 use crate::drivers::ble::mesh::pdu::{lower, ParseError};
 use crate::drivers::ble::mesh::MESH_MESSAGE;
@@ -14,6 +15,8 @@ pub enum NetMic {
     Control([u8;8]),
 }
 
+// todo: format vecs/arrays as hex
+#[derive(Format)]
 pub struct ObfuscatedAndEncryptedPDU {
     pub(crate) ivi: u8, /* 1 bit */
     pub(crate) nid: u8, /* 7 bits */

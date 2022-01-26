@@ -19,7 +19,7 @@ use heapless::Vec;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::EncodedPoint;
 
-pub trait ProvisionableContext: MeshContext {
+pub trait UnprovisionedContext: MeshContext {
     fn rng_fill(&self, dest: &mut [u8]);
 
     /*
@@ -93,7 +93,7 @@ impl Provisionable {
         self.random_provisioner.take();
     }
 
-    pub async fn process_inbound<C: ProvisionableContext>(
+    pub async fn process_inbound<C: UnprovisionedContext>(
         &mut self,
         ctx: &C,
         pdu: ProvisioningPDU,
@@ -215,7 +215,7 @@ impl Provisionable {
         }
     }
 
-    fn confirmation_device<C: ProvisionableContext>(
+    fn confirmation_device<C: UnprovisionedContext>(
         &self,
         ctx: &C,
     ) -> Result<Confirmation, DeviceError> {

@@ -106,15 +106,15 @@ impl PDU {
 
 #[derive(Clone, Format)]
 pub struct Access {
-    akf: bool,
-    aid: ApplicationKeyIdentifier,
-    message: AccessMessage,
+    pub(crate) akf: bool,
+    pub(crate) aid: ApplicationKeyIdentifier,
+    pub(crate) message: AccessMessage,
 }
 
 #[derive(Clone, Format)]
 pub struct Control {
-    opcode: Opcode,
-    message: ControlMessage,
+    pub(crate) opcode: Opcode,
+    pub(crate) message: ControlMessage,
 }
 
 #[derive(Copy, Clone, Format)]

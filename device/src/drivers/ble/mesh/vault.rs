@@ -1,6 +1,8 @@
 use core::future::Future;
 
-use crate::drivers::ble::mesh::configuration_manager::{GeneralStorage, KeyStorage, NetworkInfo};
+use crate::drivers::ble::mesh::configuration_manager::{
+    GeneralStorage, KeyStorage, NetworkInfo, NetworkKey,
+};
 use crate::drivers::ble::mesh::crypto;
 use aes::Aes128;
 use cmac::crypto_mac::Output;
@@ -14,6 +16,7 @@ use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
 use crate::drivers::ble::mesh::storage::Storage;
+use heapless::Vec;
 
 pub trait Vault {
     fn uuid(&self) -> Uuid;
@@ -62,7 +65,8 @@ pub trait Vault {
         data: &mut [u8],
         mic: &[u8],
     ) -> Result<(), DeviceError> {
-        crypto::aes_ccm_decrypt(key, nonce, data, mic).map_err(|_| DeviceError::CryptoError)
+        crypto::aes_ccm_decrypt_detached(key, nonce, data, mic)
+            .map_err(|_| DeviceError::CryptoError)
     }
 
     type SetProvisioningDataFuture<'m>: Future<Output = Result<(), DeviceError>>
@@ -73,6 +77,10 @@ pub trait Vault {
         &'m mut self,
         data: &'m ProvisioningData,
     ) -> Self::SetProvisioningDataFuture<'m>;
+
+    fn iv_index(&self) -> Option<u32>;
+
+    fn network_keys(&self, nid: u8) -> Vec<NetworkKey, 10>;
 }
 
 pub struct StorageVault<'s, S: GeneralStorage + KeyStorage> {
@@ -135,20 +143,91 @@ impl<'s, S: GeneralStorage + KeyStorage> Vault for StorageVault<'s, S> {
             let (nid, encryption_key, privacy_key) = crypto::k2(&data.network_key, &[0x00])
                 .map_err(|_| DeviceError::KeyInitialization)?;
 
-            let update = NetworkInfo {
+            let network_key = NetworkKey {
                 network_key: data.network_key,
                 key_index: data.key_index,
-                key_refresh_flag: data.key_refresh_flag,
-                iv_update_flag: data.iv_update_flag,
-                iv_index: data.iv_index,
-                unicast_address: data.unicast_address,
                 nid,
                 encryption_key,
                 privacy_key,
             };
+
+            let mut network_keys = Vec::new();
+            network_keys.push(network_key);
+
+            let update = NetworkInfo {
+                network_keys: network_keys,
+                iv_update_flag: data.iv_update_flag,
+                iv_index: data.iv_index,
+                unicast_address: data.unicast_address,
+                //nid,
+                //encryption_key,
+                //privacy_key,
+            };
+
             let mut keys = self.storage.retrieve();
             keys.set_network(&update);
             self.storage.store(keys).await
         }
     }
+
+    fn iv_index(&self) -> Option<u32> {
+        if let Some(network) = self.storage.retrieve().network() {
+            Some(network.iv_index)
+        } else {
+            None
+        }
+    }
+
+    fn network_keys(&self, nid: u8) -> Vec<NetworkKey, 10> {
+        if let Some(network) = self.storage.retrieve().network() {
+                network
+                    .network_keys
+                    .iter()
+                    .filter(|e| e.nid == nid)
+                    .map(|e| e.clone())
+                    .collect()
+        } else {
+            Vec::new()
+        }
+    }
 }
+
+/*
+struct NetworkKeyIter {
+    nid: u8,
+    network: Option<NetworkInfo>,
+    fuse_blown: bool,
+}
+
+impl NetworkInfoIter {
+    fn new(nid: u8, network: Option<NetworkInfo>) -> Self {
+        Self {
+            nid,
+            network,
+            fuse_blown: false,
+        }
+    }
+}
+
+impl Iterator for NetworkInfoIter {
+    type Item = NetworkInfo;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.fuse_blown {
+            None
+        } else {
+            self.fuse_blown = true;
+            if let Some(network) = self.network {
+                if self.nid == network.nid {
+                    Some(network)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    }
+}
+
+ */
