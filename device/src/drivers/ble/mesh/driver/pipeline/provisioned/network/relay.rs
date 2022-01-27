@@ -24,6 +24,7 @@ impl Relay {
         if ! ctx.is_local_unicast(&pdu.dst) {
             if pdu.ttl >= 2 && ! self.cache.has_seen(pdu) {
                 // decrease TTL and send a copy along.
+                defmt::info!("relay onwards");
                 Ok(Some(AuthenticatedPDU {
                     ivi: pdu.ivi,
                     nid: pdu.nid,
@@ -35,9 +36,11 @@ impl Relay {
                 }))
             } else {
                 // don't relay, TTL expired
+                defmt::info!("do not relay onwards due to ttl");
                 Ok(None)
             }
         } else {
+            defmt::info!("do not relay, local dest");
             Ok(None)
         }
     }

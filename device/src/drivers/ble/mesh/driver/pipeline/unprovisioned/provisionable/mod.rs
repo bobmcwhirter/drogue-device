@@ -44,6 +44,7 @@ pub trait UnprovisionedContext: MeshContext {
 
     fn set_provisioning_data<'m>(
         &'m self,
+        provisioning_salt: &'m [u8],
         data: &'m ProvisioningData,
     ) -> Self::SetProvisioningDataFuture<'m>;
 
@@ -202,7 +203,7 @@ impl Provisionable {
                     Ok(_) => {
                         let provisioning_data = ProvisioningData::parse(&data.encrypted)?;
                         defmt::debug!("** provisioning_data {}", provisioning_data);
-                        ctx.set_provisioning_data(&provisioning_data).await?;
+                        ctx.set_provisioning_data(&provisioning_salt, &provisioning_data).await?;
                     }
                     Err(_) => {
                         defmt::info!("decryption error!");

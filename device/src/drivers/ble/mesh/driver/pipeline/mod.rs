@@ -97,13 +97,16 @@ impl Pipeline {
                 MeshData::Network(pdu) => {
                     defmt::info!("* {}", pdu);
                     if let Some(pdu) = self.authentication.process_inbound(ctx, pdu).await? {
+                        defmt::info!("authenticated inbound -> {}", pdu);
                         // Relaying is independent from processing it locally
                         if let Some(outbound) = self.relay.process_inbound(ctx, &pdu).await? {
 
                         }
 
-                        if let Some(pdu) = self.lower.process_inbound(ctx, pdu.transport_pdu).await? {
+                        if let Some(pdu) = self.lower.process_inbound(ctx, pdu).await? {
+                            defmt::info!("upper inbound --> {}", pdu);
                             if let Some(message) = self.upper.process_inbound(ctx, pdu).await? {
+                                defmt::info!("inbound ----> {}", message);
                                 if let Some(response) = self.access.process_inbound(ctx, message).await? {
                                     // send it back outbound, finally.
                                 }

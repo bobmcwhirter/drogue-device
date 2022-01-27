@@ -54,6 +54,7 @@ pub struct Keys {
     random: Option<[u8; 16]>,
     private_key: Option<[u8; 32]>,
     shared_secret: Option<[u8; 32]>,
+    provisioning_salt: Option<[u8; 16]>,
     network: Option<NetworkInfo>,
 }
 
@@ -160,6 +161,15 @@ impl Keys {
     pub(crate) fn set_network(&mut self, network: &NetworkInfo) -> Result<(), ()> {
         self.network.replace(network.clone());
         Ok(())
+    }
+
+    pub(crate) fn set_provisioning_salt(&mut self, provisioning_salt: [u8;16]) -> Result<(), DeviceError> {
+        self.provisioning_salt.replace( provisioning_salt );
+        Ok(())
+    }
+
+    pub(crate) fn provisioning_salt(&self) -> Result<Option<[u8;16]>, DeviceError> {
+        Ok(self.provisioning_salt)
     }
 }
 

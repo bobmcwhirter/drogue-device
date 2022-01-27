@@ -1,5 +1,7 @@
+use defmt::{Format, Formatter};
 use crate::drivers::ble::mesh::pdu::ParseError;
 
+#[derive(Format)]
 pub enum AccessMessage {
     Config(Config),
     Health(Health),
@@ -15,6 +17,7 @@ impl AccessMessage {
 
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         let (opcode, parameters) = Opcode::split(data).ok_or(ParseError::InvalidPDUFormat)?;
+        defmt::info!("OPCODE {}", opcode);
         match opcode {
             CONFIG_NODE_RESET => Ok(Self::Config(Config::NodeReset(NodeReset::parse_reset(
                 parameters,
@@ -22,11 +25,15 @@ impl AccessMessage {
             CONFIG_NODE_RESET_STATUS => Ok(Self::Config(Config::NodeReset(
                 NodeReset::parse_status(parameters)?,
             ))),
+            CONFIG_RELAY_GET => Ok(Self::Config(Config::Relay(
+                Relay::parse_get(parameters)?,
+            ) )),
             _ => unimplemented!(),
         }
     }
 }
 
+#[derive(Format)]
 pub enum Config {
     AppKey(AppKey),
     Beacon(Beacon),
@@ -73,6 +80,7 @@ impl Config {
     }
 }
 
+#[derive(Format)]
 pub enum AppKey {
     Add,
     Delete,
@@ -95,6 +103,7 @@ impl AppKey {
     }
 }
 
+#[derive(Format)]
 pub enum Beacon {
     Get,
     Set,
@@ -111,6 +120,7 @@ impl Beacon {
     }
 }
 
+#[derive(Format)]
 pub enum CompositionData {
     Get,
     Status,
@@ -125,6 +135,7 @@ impl CompositionData {
     }
 }
 
+#[derive(Format)]
 pub enum DefaultTTL {
     Get,
     Set,
@@ -141,6 +152,7 @@ impl DefaultTTL {
     }
 }
 
+#[derive(Format)]
 pub enum Friend {
     Get,
     Set,
@@ -157,6 +169,7 @@ impl Friend {
     }
 }
 
+#[derive(Format)]
 pub enum GATTProxy {
     Get,
     Set,
@@ -173,6 +186,7 @@ impl GATTProxy {
     }
 }
 
+#[derive(Format)]
 pub enum HeartbeatPublication {
     Get,
     Set,
@@ -189,6 +203,7 @@ impl HeartbeatPublication {
     }
 }
 
+#[derive(Format)]
 pub enum HeartbeatSubscription {
     Get,
     Set,
@@ -205,6 +220,7 @@ impl HeartbeatSubscription {
     }
 }
 
+#[derive(Format)]
 pub enum KeyRefreshPhase {
     Get,
     Set,
@@ -221,6 +237,7 @@ impl KeyRefreshPhase {
     }
 }
 
+#[derive(Format)]
 pub enum LowPowerNodePollTimeout {
     Get,
     Status,
@@ -235,6 +252,7 @@ impl LowPowerNodePollTimeout {
     }
 }
 
+#[derive(Format)]
 pub enum Model {
     App(ModelApp),
     Publication(ModelPublication),
@@ -251,6 +269,7 @@ impl Model {
     }
 }
 
+#[derive(Format)]
 pub enum ModelApp {
     Bind,
     Status,
@@ -267,6 +286,7 @@ impl ModelApp {
     }
 }
 
+#[derive(Format)]
 pub enum ModelPublication {
     Get,
     Status,
@@ -283,6 +303,7 @@ impl ModelPublication {
     }
 }
 
+#[derive(Format)]
 pub enum ModelSubscription {
     Add,
     Delete,
@@ -309,6 +330,7 @@ impl ModelSubscription {
     }
 }
 
+#[derive(Format)]
 pub enum NetKey {
     Add,
     Delete,
@@ -331,6 +353,7 @@ impl NetKey {
     }
 }
 
+#[derive(Format)]
 pub enum NetworkTransmit {
     Get,
     Set,
@@ -347,6 +370,7 @@ impl NetworkTransmit {
     }
 }
 
+#[derive(Format)]
 pub enum NodeIdentity {
     Get,
     Set,
@@ -363,6 +387,7 @@ impl NodeIdentity {
     }
 }
 
+#[derive(Format)]
 pub enum NodeReset {
     Reset,
     Status,
@@ -393,6 +418,7 @@ impl NodeReset {
     }
 }
 
+#[derive(Format)]
 pub enum Relay {
     Get,
     Set,
@@ -407,8 +433,17 @@ impl Relay {
             Self::Status => CONFIG_RELAY_STATUS,
         }
     }
+
+    pub fn parse_get(parameters: &[u8]) -> Result<Self, ParseError> {
+        if parameters.is_empty() {
+            Ok(Self::Get)
+        } else {
+            Err(ParseError::InvalidLength)
+        }
+    }
 }
 
+#[derive(Format)]
 pub enum SIGModel {
     App(SIGModelApp),
     Subscription(SIGModelSubscription),
@@ -423,6 +458,7 @@ impl SIGModel {
     }
 }
 
+#[derive(Format)]
 pub enum SIGModelApp {
     Get,
     List,
@@ -437,6 +473,7 @@ impl SIGModelApp {
     }
 }
 
+#[derive(Format)]
 pub enum SIGModelSubscription {
     Get,
     List,
@@ -451,6 +488,7 @@ impl SIGModelSubscription {
     }
 }
 
+#[derive(Format)]
 pub enum VendorModel {
     App(VendorModelApp),
     Susbcription(VendorModelSubscription),
@@ -465,6 +503,7 @@ impl VendorModel {
     }
 }
 
+#[derive(Format)]
 pub enum VendorModelApp {
     Get,
     List,
@@ -479,6 +518,7 @@ impl VendorModelApp {
     }
 }
 
+#[derive(Format)]
 pub enum VendorModelSubscription {
     Get,
     List,
@@ -493,6 +533,7 @@ impl VendorModelSubscription {
     }
 }
 
+#[derive(Format)]
 pub enum Health {
     Attention(Attention),
     CurrentStatus,
@@ -511,6 +552,7 @@ impl Health {
     }
 }
 
+#[derive(Format)]
 pub enum Attention {
     Get,
     Set,
@@ -527,6 +569,7 @@ impl Attention {
     }
 }
 
+#[derive(Format)]
 pub enum Fault {
     Clear,
     ClearUnacknowledged,
@@ -549,6 +592,7 @@ impl Fault {
     }
 }
 
+#[derive(Format)]
 pub enum Period {
     Get,
     Set,
@@ -574,6 +618,22 @@ pub enum Opcode {
     ThreeOctet(u8, u8, u8),
 }
 
+impl Format for Opcode {
+    fn format(&self, fmt: Formatter) {
+        match self {
+            Opcode::OneOctet(a) => {
+                defmt::write!(fmt, "{:x}", a)
+            }
+            Opcode::TwoOctet(a, b) => {
+                defmt::write!(fmt, "{:x} {:x}", a, b)
+            }
+            Opcode::ThreeOctet(a, b, c) => {
+                defmt::write!(fmt, "{:x} {:x} {:x}", a, b, c)
+            }
+        }
+    }
+}
+
 impl Opcode {
     pub fn matches(&self, data: &[u8]) -> bool {
         match self {
@@ -597,6 +657,7 @@ impl Opcode {
     }
 
     pub fn split(data: &[u8]) -> Option<(Opcode, &[u8])> {
+        defmt::info!("opcode split {:x}", data);
         if data.is_empty() {
             None
         } else {

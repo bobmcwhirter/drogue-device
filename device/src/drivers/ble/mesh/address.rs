@@ -1,6 +1,6 @@
 use defmt::Format;
 
-#[derive(Copy, Clone, Format)]
+#[derive(Copy, Clone, Format, PartialEq)]
 pub enum Address {
     Unassigned,
     Unicast(UnicastAddress),
@@ -8,17 +8,46 @@ pub enum Address {
     Group(GroupAddress),
 }
 
-#[derive(Copy, Clone, Format)]
+impl Address {
+    pub fn as_bytes(&self) -> [u8;2] {
+        match self {
+            Address::Unassigned => { [0,0]}
+            Address::Unicast(inner) => inner.as_bytes(),
+            Address::Virtual(inner) => inner.as_bytes(),
+            Address::Group(inner) =>inner.as_bytes(),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Format, PartialEq)]
 pub struct InvalidAddress;
 
-#[derive(Copy, Clone, Format)]
+#[derive(Copy, Clone, Format, PartialEq)]
 pub struct UnicastAddress([u8; 2]);
 
-#[derive(Copy, Clone, Format)]
+impl UnicastAddress {
+    pub fn as_bytes(&self) -> [u8;2] {
+        [ self.0[0], self.0[1] ]
+    }
+}
+
+#[derive(Copy, Clone, Format, PartialEq)]
 pub struct VirtualAddress([u8; 2]);
 
-#[derive(Copy, Clone, Format)]
+impl VirtualAddress {
+    pub fn as_bytes(&self) -> [u8;2] {
+        [ self.0[0], self.0[1] ]
+    }
+}
+
+#[derive(Copy, Clone, Format, PartialEq)]
 pub struct GroupAddress([u8; 2]);
+
+impl GroupAddress {
+    pub fn as_bytes(&self) -> [u8;2] {
+        [ self.0[0], self.0[1] ]
+    }
+}
 
 impl UnicastAddress {
     pub fn is_unicast_address(data: &[u8; 2]) -> bool {

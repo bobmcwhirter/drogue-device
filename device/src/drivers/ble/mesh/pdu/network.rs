@@ -10,6 +10,7 @@ pub enum PDU {
     Authenticated(AuthenticatedPDU),
 }
 
+#[derive(Format)]
 pub enum NetMic {
     Access([u8;4]),
     Control([u8;8]),
@@ -49,6 +50,7 @@ impl ObfuscatedAndEncryptedPDU {
     }
 }
 
+#[derive(Format)]
 pub struct AuthenticatedPDU {
     pub(crate) ivi: u8, /* 1 bit */
     pub(crate) nid: u8, /* 7 bits */

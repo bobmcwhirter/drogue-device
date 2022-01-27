@@ -27,6 +27,7 @@ use core::future::Future;
 use heapless::Vec;
 use p256::PublicKey;
 use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::pdu::upper::TransMIC;
 
 // ------------------------------------------------------------------------
 // Unprovisioned pipeline context
@@ -63,9 +64,10 @@ where
 
     fn set_provisioning_data<'m>(
         &'m self,
+        provisioning_salt: &'m [u8],
         data: &'m ProvisioningData,
     ) -> Self::SetProvisioningDataFuture<'m> {
-        async move { self.vault().set_provisioning_data(data).await }
+        async move { self.vault().set_provisioning_data(provisioning_salt, data).await }
     }
 
     fn aes_cmac(&self, key: &[u8], input: &[u8]) -> Result<Output<Cmac<Aes128>>, DeviceError> {
@@ -155,7 +157,7 @@ where
     TX: Transmitter,
 {
     fn is_local_unicast(&self, address: &Address) -> bool {
-        todo!()
+        self.vault().is_local_unicast(address)
     }
 }
 
@@ -182,6 +184,9 @@ where
     S: Storage,
     TX: Transmitter,
 {
+    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &TransMIC) -> Result<(), DeviceError> {
+        self.vault().decrypt_device_key(nonce, bytes, mic)
+    }
 }
 
 impl<TX, RX, S, R> UpperContext for Node<TX, RX, S, R>
