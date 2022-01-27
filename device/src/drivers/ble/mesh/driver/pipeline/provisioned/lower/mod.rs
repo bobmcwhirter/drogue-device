@@ -8,10 +8,9 @@ use crate::drivers::ble::mesh::pdu::lower::{Access, AccessMessage, ControlMessag
 
 use heapless::Vec;
 use crate::drivers::ble::mesh::driver::pipeline::provisioned::network::authentication::AuthenticationContext;
-use crate::drivers::ble::mesh::pdu::upper::TransMIC;
 
 pub trait LowerContext : AuthenticationContext {
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &TransMIC) -> Result<(), DeviceError>;
+    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
 }
 
 pub struct Lower {
@@ -40,7 +39,7 @@ impl Lower {
                         defmt::info!("split lower {:x}", payload);
                         let (payload, trans_mic) = payload.split_at( payload.len() - 4);
                         let mut payload = Vec::from_slice(payload).map_err(|_|DeviceError::InsufficientBuffer)?;
-                        let trans_mic = TransMIC::Bit32( trans_mic.try_into().map_err(|_|DeviceError::InvalidKeyLength)? );
+                        //let trans_mic = TransMIC::Bit32( trans_mic.try_into().map_err(|_|DeviceError::InvalidKeyLength)? );
                         let mut nonce = [0;13];
 
                         if access.akf {
@@ -80,7 +79,7 @@ impl Lower {
                         }
                         Ok(Some(upper::PDU::Access( upper::Access {
                             payload,
-                            trans_mic,
+                            //trans_mic,
                         })))
                     }
                     AccessMessage::Segmented { .. } => {

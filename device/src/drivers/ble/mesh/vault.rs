@@ -16,7 +16,6 @@ use rand_core::{CryptoRng, RngCore};
 use crate::drivers::ble::mesh::address::{Address, UnicastAddress};
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
-use crate::drivers::ble::mesh::pdu::upper::TransMIC;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
 use crate::drivers::ble::mesh::storage::Storage;
 use heapless::Vec;
@@ -92,7 +91,7 @@ pub trait Vault {
 
     fn is_local_unicast(&self, addr: &Address) -> bool;
 
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &TransMIC) -> Result<(), DeviceError>;
+    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
 }
 
 pub struct StorageVault<'s, S: GeneralStorage + KeyStorage> {
@@ -228,15 +227,10 @@ impl<'s, S: GeneralStorage + KeyStorage> Vault for StorageVault<'s, S> {
         }
     }
 
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &TransMIC) -> Result<(), DeviceError> {
+    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError> {
         let keys = self.storage.retrieve();
         if let Some(salt) = keys.provisioning_salt()? {
             let device_key = self.prdk(&salt)?;
-
-            let mic: &[u8] = match mic {
-                TransMIC::Bit32(inner) => inner,
-                TransMIC::Bit64(inner) => inner,
-            };
             crypto::aes_ccm_decrypt_detached(&*device_key.into_bytes(), nonce, bytes, mic)
                 .map_err(|_| DeviceError::CryptoError)
         } else {

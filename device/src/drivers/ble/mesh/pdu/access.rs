@@ -28,7 +28,14 @@ impl AccessMessage {
             CONFIG_RELAY_GET => Ok(Self::Config(Config::Relay(
                 Relay::parse_get(parameters)?,
             ) )),
-            _ => unimplemented!(),
+            CONFIG_BEACON_GET => Ok(Self::Config(Config::Beacon(
+                Beacon::parse_get(parameters)?,
+            ) )),
+            _ => {
+                let same = CONFIG_BEACON_GET == opcode;
+                defmt::info!("same? {} {} {}", same, CONFIG_BEACON_GET, opcode);
+                Err(ParseError::InvalidValue)
+            },
         }
     }
 }
@@ -116,6 +123,15 @@ impl Beacon {
             Self::Get => CONFIG_BEACON_GET,
             Self::Set => CONFIG_BEACON_SET,
             Self::Status => CONFIG_BEACON_STATUS,
+        }
+    }
+
+    pub fn parse_get(parameters: &[u8]) -> Result<Self, ParseError> {
+        defmt::info!("parse beacon get {:x}", parameters);
+        if parameters.is_empty() {
+            Ok(Self::Get)
+        } else {
+            Err(ParseError::InvalidLength)
         }
     }
 }
@@ -611,7 +627,7 @@ impl Period {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 pub enum Opcode {
     OneOctet(u8),
     TwoOctet(u8, u8),
@@ -664,13 +680,13 @@ impl Opcode {
             if data[0] & 0b10000000 == 0 {
                 // one octet
                 Some((Opcode::OneOctet(data[0] & 0b00111111), &data[1..]))
-            } else if data.len() >= 2 && data[0] & 0b11000000 == 0b01000000 {
+            } else if data.len() >= 2 && data[0] & 0b11000000 == 0b10000000 {
                 // two octet
-                Some((Opcode::TwoOctet(data[0] & 0b00111111, data[1]), &data[2..]))
+                Some((Opcode::TwoOctet(data[0], data[1]), &data[2..]))
             } else if data.len() >= 3 && data[0] & 0b11000000 == 0b11000000 {
                 // three octet
                 Some((
-                    Opcode::ThreeOctet(data[0] & 0b00111111, data[1], data[2]),
+                    Opcode::ThreeOctet(data[0], data[1], data[2]),
                     &data[3..],
                 ))
             } else {

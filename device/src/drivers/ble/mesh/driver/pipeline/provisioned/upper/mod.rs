@@ -26,7 +26,7 @@ impl Upper {
                 todo!()
             }
             PDU::Access(access) => {
-                // todo: check trans_mic
+                defmt::info!("parsing upper into access");
                 let message = AccessMessage::parse(&*access.payload)?;
                 Ok(Some(message))
             }
