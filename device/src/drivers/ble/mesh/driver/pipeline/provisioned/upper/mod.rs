@@ -1,5 +1,5 @@
 use crate::drivers::ble::mesh::driver::DeviceError;
-use crate::drivers::ble::mesh::pdu::{access, lower, upper};
+use crate::drivers::ble::mesh::pdu::{access, upper};
 use crate::drivers::ble::mesh::pdu::access::AccessMessage;
 use crate::drivers::ble::mesh::pdu::upper::PDU;
 

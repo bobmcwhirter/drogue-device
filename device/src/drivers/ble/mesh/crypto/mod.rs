@@ -13,6 +13,8 @@ use core::iter::FromIterator;
 use aes::cipher::Block;
 use heapless::Vec;
 
+pub mod nonce;
+
 const ZERO: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 pub fn s1(input: &[u8]) -> Result<Output<Cmac<Aes128>>, InvalidKeyLength> {

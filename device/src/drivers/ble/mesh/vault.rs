@@ -19,6 +19,7 @@ use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::provisioning::ProvisioningData;
 use crate::drivers::ble::mesh::storage::Storage;
 use heapless::Vec;
+use crate::drivers::ble::mesh::crypto::nonce::DeviceNonce;
 
 pub trait Vault {
     fn uuid(&self) -> Uuid;
@@ -91,7 +92,7 @@ pub trait Vault {
 
     fn is_local_unicast(&self, addr: &Address) -> bool;
 
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
+    fn decrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
 }
 
 pub struct StorageVault<'s, S: GeneralStorage + KeyStorage> {
@@ -227,11 +228,11 @@ impl<'s, S: GeneralStorage + KeyStorage> Vault for StorageVault<'s, S> {
         }
     }
 
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError> {
+    fn decrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError> {
         let keys = self.storage.retrieve();
         if let Some(salt) = keys.provisioning_salt()? {
             let device_key = self.prdk(&salt)?;
-            crypto::aes_ccm_decrypt_detached(&*device_key.into_bytes(), nonce, bytes, mic)
+            crypto::aes_ccm_decrypt_detached(&*device_key.into_bytes(), &nonce.into_bytes(), bytes, mic)
                 .map_err(|_| DeviceError::CryptoError)
         } else {
             Err(DeviceError::CryptoError)

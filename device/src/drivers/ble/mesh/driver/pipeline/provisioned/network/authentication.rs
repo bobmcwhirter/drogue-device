@@ -5,6 +5,7 @@ use crate::drivers::ble::mesh::driver::DeviceError;
 use crate::drivers::ble::mesh::pdu::lower;
 use crate::drivers::ble::mesh::pdu::network::{AuthenticatedPDU, ObfuscatedAndEncryptedPDU};
 use heapless::Vec;
+use crate::drivers::ble::mesh::crypto::nonce::NetworkNonce;
 
 pub trait AuthenticationContext {
     fn iv_index(&self) -> Option<u32>;
@@ -74,29 +75,14 @@ impl Authentication {
                 defmt::info!("unobfuscated {:x}", unobfuscated);
                 let ctl = (unobfuscated[0] & 0b10000000) != 0;
 
-                let mut nonce = [0;13];
-                nonce[0] = 0x00;
-                // ctl+ttl
-                nonce[1] = unobfuscated[0];
+                let seq = u32::from_be_bytes( [0, unobfuscated[1], unobfuscated[2], unobfuscated[3]]);
 
-                // seq
-                nonce[2] = unobfuscated[1];
-                nonce[3] = unobfuscated[2];
-                nonce[4] = unobfuscated[3];
-
-                // src
-                nonce[5] = unobfuscated[4];
-                nonce[6] = unobfuscated[5];
-
-                // padding
-                nonce[7] = 0x00;
-                nonce[8] = 0x00;
-
-                // IV index
-                nonce[9] = iv_index_bytes[0];
-                nonce[10] = iv_index_bytes[1];
-                nonce[11] = iv_index_bytes[2];
-                nonce[12] = iv_index_bytes[3];
+                let nonce = NetworkNonce::new(
+                    unobfuscated[0],
+                    seq,
+                    [ unobfuscated[4], unobfuscated[5] ],
+                    ctx.iv_index().ok_or(DeviceError::CryptoError)?,
+                );
 
                 defmt::info!("AUTHN 7");
 
@@ -113,7 +99,7 @@ impl Authentication {
                 defmt::info!("AUTHN 9");
 
                 if let Ok(_) =
-                    aes_ccm_decrypt_detached(&network_key.encryption_key, &nonce, payload, mic)
+                    aes_ccm_decrypt_detached(&network_key.encryption_key, &nonce.into_bytes(), payload, mic)
                 {
                     defmt::info!("AUTHN 10");
                     let ttl = unobfuscated[0] & 0b01111111;

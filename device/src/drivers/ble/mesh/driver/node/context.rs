@@ -27,6 +27,7 @@ use core::future::Future;
 use heapless::Vec;
 use p256::PublicKey;
 use rand_core::{CryptoRng, RngCore};
+use crate::drivers::ble::mesh::crypto::nonce::DeviceNonce;
 
 // ------------------------------------------------------------------------
 // Unprovisioned pipeline context
@@ -183,7 +184,7 @@ where
     S: Storage,
     TX: Transmitter,
 {
-    fn decrypt_device_key(&self, nonce: &[u8], bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError> {
+    fn decrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError> {
         self.vault().decrypt_device_key(nonce, bytes, mic)
     }
 }
