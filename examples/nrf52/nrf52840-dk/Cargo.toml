@@ -33,8 +33,7 @@ overflow-checks = false
 codegen-units = 8
 debug = false
 debug-assertions = false
-#opt-level = 0 
-opt-level = "z"
+opt-level = 0 
 overflow-checks = false
 
 [patch.crates-io]

@@ -1,4 +1,4 @@
-use crate::drivers::ble::mesh::pdu::network::AuthenticatedPDU;
+use crate::drivers::ble::mesh::pdu::network::CleartextNetworkPDU;
 
 pub struct NetworkMessageCache {
 
@@ -14,7 +14,7 @@ impl Default for NetworkMessageCache {
 
 impl NetworkMessageCache {
 
-    pub fn has_seen(&mut self, pdu: &AuthenticatedPDU) -> bool {
+    pub fn has_seen(&mut self, pdu: &CleartextNetworkPDU) -> bool {
         todo!()
     }
 

@@ -17,7 +17,7 @@ use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use crate::drivers::ble::mesh::crypto::aes_ccm_decrypt_detached;
 use crate::drivers::ble::mesh::pdu::network;
-use crate::drivers::ble::mesh::pdu::network::ObfuscatedAndEncryptedPDU;
+use crate::drivers::ble::mesh::pdu::network::ObfuscatedAndEncryptedNetworkPDU;
 use heapless::Vec;
 
 #[derive(Serialize, Deserialize, Clone, Default, Format)]
@@ -75,7 +75,7 @@ pub struct NetworkInfo {
     //pub(crate) privacy_key: [u8; 16],
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, Format)]
+#[derive(Serialize, Deserialize, Copy, Clone, Default, Format)]
 pub struct NetworkKey {
     pub(crate) network_key: [u8; 16],
     pub(crate) key_index: u16,
@@ -85,7 +85,7 @@ pub struct NetworkKey {
 }
 
 impl NetworkInfo {
-    pub fn authenticate(&self, pdu: &ObfuscatedAndEncryptedPDU) -> bool {
+    pub fn authenticate(&self, pdu: &ObfuscatedAndEncryptedNetworkPDU) -> bool {
         defmt::info!("try to authenticate with network info {}", self);
         //let result = aes_ccm_decrypt(&self.network_key, nonce, &*pdu.encrypted_and_mic);
         false

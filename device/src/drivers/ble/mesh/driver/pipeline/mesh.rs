@@ -1,25 +1,38 @@
-use crate::drivers::ble::mesh::pdu::bearer::advertising;
-use crate::drivers::ble::mesh::pdu::{network, ParseError};
 use crate::drivers::ble::mesh::device::Uuid;
 use crate::drivers::ble::mesh::driver::DeviceError;
+use crate::drivers::ble::mesh::pdu::bearer::advertising;
+use crate::drivers::ble::mesh::pdu::bearer::advertising::AdvertisingPDU;
+use crate::drivers::ble::mesh::pdu::network::ObfuscatedAndEncryptedNetworkPDU;
+use crate::drivers::ble::mesh::pdu::{network, ParseError};
 use crate::drivers::ble::mesh::{MESH_MESSAGE, PB_ADV};
 use core::future::Future;
 
 pub trait MeshContext {
     fn uuid(&self) -> Uuid;
 
-    type TransmitFuture<'m>: Future<Output = Result<(), DeviceError>>
+    type TransmitAdvertisingFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
         Self: 'm;
 
-    fn transmit_pdu<'m>(&'m self, pdu: advertising::PDU) -> Self::TransmitFuture<'m>;
+    fn transmit_advertising_pdu<'m>(
+        &'m self,
+        pdu: AdvertisingPDU,
+    ) -> Self::TransmitAdvertisingFuture<'m>;
+
+    type TransmitMeshFuture<'m>: Future<Output = Result<(), DeviceError>>
+    where
+        Self: 'm;
+    fn transmit_mesh_pdu<'m>(
+        &'m self,
+        pdu: &'m ObfuscatedAndEncryptedNetworkPDU,
+    ) -> Self::TransmitMeshFuture<'m>;
 }
 
 pub struct Mesh {}
 
 pub enum MeshData {
-    Provisioning(advertising::PDU),
-    Network(network::ObfuscatedAndEncryptedPDU),
+    Provisioning(advertising::AdvertisingPDU),
+    Network(network::ObfuscatedAndEncryptedNetworkPDU),
 }
 
 impl Default for Mesh {
@@ -38,13 +51,15 @@ impl Mesh {
         if data.len() >= 2 {
             if data[1] == PB_ADV {
                 Ok(Some(MeshData::Provisioning(
-                    advertising::PDU::parse(data).map_err(|_| DeviceError::InvalidPacket)?,
+                    advertising::AdvertisingPDU::parse(data)
+                        .map_err(|_| DeviceError::InvalidPacket)?,
                 )))
             } else if data[1] == MESH_MESSAGE {
                 let len = data[0] as usize;
-                if data.len() >= len+1 {
+                if data.len() >= len + 1 {
                     Ok(Some(MeshData::Network(
-                        network::ObfuscatedAndEncryptedPDU::parse(&data[2..2+len-1]).map_err(|_| DeviceError::InvalidPacket)?,
+                        network::ObfuscatedAndEncryptedNetworkPDU::parse(&data[2..2 + len - 1])
+                            .map_err(|_| DeviceError::InvalidPacket)?,
                     )))
                 } else {
                     Err(DeviceError::ParseError(ParseError::InvalidLength))
@@ -60,8 +75,8 @@ impl Mesh {
     pub async fn process_outbound<C: MeshContext>(
         &mut self,
         ctx: &C,
-        pdu: advertising::PDU,
+        pdu: advertising::AdvertisingPDU,
     ) -> Result<(), DeviceError> {
-        ctx.transmit_pdu(pdu).await
+        ctx.transmit_advertising_pdu(pdu).await
     }
 }

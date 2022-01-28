@@ -1,20 +1,59 @@
-use defmt::{Format, Formatter};
 use crate::drivers::ble::mesh::pdu::ParseError;
+use crate::drivers::ble::mesh::InsufficientBuffer;
+use defmt::{Format, Formatter};
+use heapless::Vec;
+use crate::drivers::ble::mesh::address::{Address, UnicastAddress};
+use crate::drivers::ble::mesh::app::ApplicationKeyIdentifier;
+use crate::drivers::ble::mesh::configuration_manager::NetworkKey;
+use crate::drivers::ble::mesh::pdu::upper::UpperAccess;
 
 #[derive(Format)]
-pub enum AccessMessage {
-    Config(Config),
-    Health(Health),
+pub struct AccessMessage {
+    pub(crate) network_key: NetworkKey,
+    pub(crate) ivi: u8,
+    pub(crate) nid: u8,
+    pub(crate) akf: bool,
+    pub(crate) aid: ApplicationKeyIdentifier,
+    pub(crate) src: UnicastAddress,
+    pub(crate) dst: Address,
+    pub(crate) payload: AccessPayload,
 }
 
 impl AccessMessage {
     pub fn opcode(&self) -> Opcode {
-        match self {
-            AccessMessage::Config(inner) => inner.opcode(),
-            AccessMessage::Health(inner) => inner.opcode(),
+        match &self.payload {
+            AccessPayload::Config(inner) => inner.opcode(),
+            AccessPayload::Health(inner) => inner.opcode(),
         }
     }
 
+    pub fn parse(access: &UpperAccess) -> Result<Self, ParseError> {
+        Ok(
+            Self{
+                network_key: access.network_key,
+                ivi: access.ivi,
+                nid: access.nid,
+                akf: access.akf,
+                aid: access.aid,
+                src: access.src,
+                dst: access.dst,
+                payload: AccessPayload::parse(&access.payload)?
+            }
+        )
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        self.payload.emit(xmit)
+    }
+}
+
+#[derive(Format)]
+pub enum AccessPayload {
+    Config(Config),
+    Health(Health),
+}
+
+impl AccessPayload {
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         let (opcode, parameters) = Opcode::split(data).ok_or(ParseError::InvalidPDUFormat)?;
         defmt::info!("OPCODE {}", opcode);
@@ -25,17 +64,20 @@ impl AccessMessage {
             CONFIG_NODE_RESET_STATUS => Ok(Self::Config(Config::NodeReset(
                 NodeReset::parse_status(parameters)?,
             ))),
-            CONFIG_RELAY_GET => Ok(Self::Config(Config::Relay(
-                Relay::parse_get(parameters)?,
-            ) )),
-            CONFIG_BEACON_GET => Ok(Self::Config(Config::Beacon(
-                Beacon::parse_get(parameters)?,
-            ) )),
+            CONFIG_RELAY_GET => Ok(Self::Config(Config::Relay(Relay::parse_get(parameters)?))),
+            CONFIG_BEACON_GET => Ok(Self::Config(Config::Beacon(Beacon::parse_get(parameters)?))),
             _ => {
                 let same = CONFIG_BEACON_GET == opcode;
                 defmt::info!("same? {} {} {}", same, CONFIG_BEACON_GET, opcode);
                 Err(ParseError::InvalidValue)
-            },
+            }
+        }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        match self {
+            AccessPayload::Config(inner) => inner.emit(xmit),
+            AccessPayload::Health(inner) => inner.emit(xmit),
         }
     }
 }
@@ -85,6 +127,29 @@ impl Config {
             Self::VendorModel(inner) => inner.opcode(),
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        match self {
+            Config::AppKey(inner) => inner.emit(xmit),
+            Config::Beacon(inner) => inner.emit(xmit),
+            Config::CompositionData(inner) => inner.emit(xmit),
+            Config::DefaultTTL(inner) => inner.emit(xmit),
+            Config::Friend(inner) => inner.emit(xmit),
+            Config::GATTProxy(inner) => inner.emit(xmit),
+            Config::HeartbeatPublication(inner) => inner.emit(xmit),
+            Config::HeartbeatSubscription(inner) => inner.emit(xmit),
+            Config::KeyRefreshPhase(inner) => inner.emit(xmit),
+            Config::LowPowerNodePollTimeout(inner) => inner.emit(xmit),
+            Config::Model(inner) => inner.emit(xmit),
+            Config::NetKey(inner) => inner.emit(xmit),
+            Config::NetworkTransmit(inner) => inner.emit(xmit),
+            Config::NodeIdentity(inner) => inner.emit(xmit),
+            Config::NodeReset(inner) => inner.emit(xmit),
+            Config::Relay(inner) => inner.emit(xmit),
+            Config::SIGModel(inner) => inner.emit(xmit),
+            Config::VendorModel(inner) => inner.emit(xmit),
+        }
+    }
 }
 
 #[derive(Format)]
@@ -108,13 +173,16 @@ impl AppKey {
             Self::Update => CONFIG_APPKEY_STATUS,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
 pub enum Beacon {
     Get,
     Set,
-    Status,
+    Status(bool),
 }
 
 impl Beacon {
@@ -122,7 +190,7 @@ impl Beacon {
         match self {
             Self::Get => CONFIG_BEACON_GET,
             Self::Set => CONFIG_BEACON_SET,
-            Self::Status => CONFIG_BEACON_STATUS,
+            Self::Status(_) => CONFIG_BEACON_STATUS,
         }
     }
 
@@ -133,6 +201,18 @@ impl Beacon {
         } else {
             Err(ParseError::InvalidLength)
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        self.opcode().emit(xmit)?;
+        match self {
+            Beacon::Get => {}
+            Beacon::Set => {}
+            Beacon::Status(val) => xmit
+                .push(if *val { 1 } else { 0 })
+                .map_err(|_| InsufficientBuffer)?,
+        }
+        Ok(())
     }
 }
 
@@ -148,6 +228,9 @@ impl CompositionData {
             Self::Get => CONFIG_COMPOSITION_DATA_GET,
             Self::Status => CONFIG_COMPOSITION_DATA_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -166,6 +249,10 @@ impl DefaultTTL {
             Self::Status => CONFIG_DEFAULT_TTL_STATUS,
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -182,6 +269,9 @@ impl Friend {
             Self::Set => CONFIG_FRIEND_SET,
             Self::Status => CONFIG_FRIEND_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -200,6 +290,9 @@ impl GATTProxy {
             Self::Status => CONFIG_GATT_PROXY_STATUS,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -216,6 +309,9 @@ impl HeartbeatPublication {
             Self::Set => CONFIG_HEARTBEAT_PUBLICATION_SET,
             Self::Status => CONFIG_HEARTBEAT_PUBLICATION_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -234,6 +330,9 @@ impl HeartbeatSubscription {
             Self::Status => CONFIG_HEARTBEAT_SUBSCRIPTION_STATUS,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -251,6 +350,9 @@ impl KeyRefreshPhase {
             Self::Status => CONFIG_KEY_REFRESH_PHASE_STATUS,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -265,6 +367,9 @@ impl LowPowerNodePollTimeout {
             Self::Get => CONFIG_LOW_POWER_NODE_POLLTIMEOUT_GET,
             Self::Status => CONFIG_LOW_POWER_NODE_POLLTIMEOUT_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -283,6 +388,9 @@ impl Model {
             Self::Subscription(inner) => inner.opcode(),
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -300,6 +408,9 @@ impl ModelApp {
             Self::Unbind => CONFIG_MODEL_APP_UNBIND,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -316,6 +427,9 @@ impl ModelPublication {
             Self::Status => CONFIG_MODEL_PUBLICATION_STATUS,
             Self::VirtualAddressSet => CONFIG_MODEL_PUBLICATION_VIRTUAL_ADDRESS_SET,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -344,6 +458,9 @@ impl ModelSubscription {
             Self::VirtualAddressOverwrite => CONFIG_MODEL_SUBSCRIPTION_VIRTUAL_ADDRESS_OVERWRITE,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -367,6 +484,9 @@ impl NetKey {
             Self::Update => CONFIG_NETKEY_UPDATE,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -384,6 +504,9 @@ impl NetworkTransmit {
             Self::Status => CONFIG_NETWORK_TRANSMIT_STATUS,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -400,6 +523,9 @@ impl NodeIdentity {
             Self::Set => CONFIG_NODE_IDENTITY_SET,
             Self::Status => CONFIG_NODE_IDENTITY_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -432,6 +558,9 @@ impl NodeReset {
             Err(ParseError::InvalidLength)
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -457,6 +586,9 @@ impl Relay {
             Err(ParseError::InvalidLength)
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -471,6 +603,9 @@ impl SIGModel {
             Self::App(inner) => inner.opcode(),
             Self::Subscription(inner) => inner.opcode(),
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -487,6 +622,9 @@ impl SIGModelApp {
             Self::List => CONFIG_SIG_MODEL_APP_LIST,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -501,6 +639,9 @@ impl SIGModelSubscription {
             Self::Get => CONFIG_SIG_MODEL_SUBSCRIPTION_GET,
             Self::List => CONFIG_SIG_MODEL_SUBSCRIPTION_LIST,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -517,6 +658,9 @@ impl VendorModel {
             Self::Susbcription(inner) => inner.opcode(),
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -532,6 +676,9 @@ impl VendorModelApp {
             Self::List => CONFIG_VENDOR_MODEL_APP_LIST,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -546,6 +693,9 @@ impl VendorModelSubscription {
             Self::Get => CONFIG_VENDOR_MODEL_SUBSCRIPTION_GET,
             Self::List => CONFIG_VENDOR_MODEL_SUBSCRIPTION_LIST,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -566,6 +716,10 @@ impl Health {
             Self::Period(inner) => inner.opcode(),
         }
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -582,6 +736,9 @@ impl Attention {
             Self::Set => HEALTH_ATTENTION_SET,
             Self::SetUnacknowledged => HEALTH_ATTENTION_SET_UNACKNOWLEDGED,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -606,6 +763,9 @@ impl Fault {
             Self::TestUnacknowledged => HEALTH_FAULT_TEST_UNACKNOWLEDGED,
         }
     }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
 }
 
 #[derive(Format)]
@@ -624,6 +784,9 @@ impl Period {
             Self::SetUnacknowledged => HEALTH_PERIOD_SET_UNACKNOWLEDGED,
             Self::Status => HEALTH_PERIOD_STATUS,
         }
+    }
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
     }
 }
 
@@ -685,14 +848,29 @@ impl Opcode {
                 Some((Opcode::TwoOctet(data[0], data[1]), &data[2..]))
             } else if data.len() >= 3 && data[0] & 0b11000000 == 0b11000000 {
                 // three octet
-                Some((
-                    Opcode::ThreeOctet(data[0], data[1], data[2]),
-                    &data[3..],
-                ))
+                Some((Opcode::ThreeOctet(data[0], data[1], data[2]), &data[3..]))
             } else {
                 None
             }
         }
+    }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        match self {
+            Opcode::OneOctet(a) => {
+                xmit.push(*a).map_err(|_|InsufficientBuffer)?;
+            }
+            Opcode::TwoOctet(a, b) => {
+                xmit.push(*a).map_err(|_|InsufficientBuffer)?;
+                xmit.push(*b).map_err(|_|InsufficientBuffer)?;
+            }
+            Opcode::ThreeOctet(a, b, c) => {
+                xmit.push(*a).map_err(|_|InsufficientBuffer)?;
+                xmit.push(*b).map_err(|_|InsufficientBuffer)?;
+                xmit.push(*c).map_err(|_|InsufficientBuffer)?;
+            }
+        }
+        Ok(())
     }
 }
 

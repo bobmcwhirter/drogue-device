@@ -12,6 +12,7 @@ use core::convert::TryInto;
 use core::iter::FromIterator;
 use aes::cipher::Block;
 use heapless::Vec;
+use crate::drivers::ble::mesh::pdu::lower::SzMic;
 
 pub mod nonce;
 
@@ -78,25 +79,45 @@ pub fn e(key: &[u8], mut data: [u8;16])  -> Result<[u8;16], InvalidKeyLength>{
     Ok(data)
 }
 
-type AesCcm_32bitMac = Ccm<Aes128, U4, U13>;
-type AesCcm_64bitMac = Ccm<Aes128, U8, U13>;
+type AesCcm32bitMac = Ccm<Aes128, U4, U13>;
+type AesCcm64bitMac = Ccm<Aes128, U8, U13>;
 
 pub fn aes_ccm_decrypt_detached(key: &[u8], nonce: &[u8], data: &mut [u8], mic: &[u8]) -> Result<(), Error> {
-    defmt::info!("decrypt a");
     let key = GenericArray::<u8, <Aes128 as NewBlockCipher>::KeySize>::from_slice(key);
-    defmt::info!("decrypt b");
     match mic.len() {
         4 => {
-            defmt::info!("decrypt c");
-            let ccm = AesCcm_32bitMac::new(&key);
-            defmt::info!("decrypt d {:x} {:x}", data, mic);
+            let ccm = AesCcm32bitMac::new(&key);
             ccm.decrypt_in_place_detached(nonce.into(), &[], data, mic.into())
         }
         8 => {
-            defmt::info!("decrypt e");
-            let ccm = AesCcm_64bitMac::new(&key);
-            defmt::info!("decrypt f {:x} {:x}", data, mic);
+            let ccm = AesCcm64bitMac::new(&key);
             ccm.decrypt_in_place_detached(nonce.into(), &[], data, mic.into())
+        }
+        _ => {
+            Err(Error)
+        }
+    }
+}
+
+
+pub fn aes_ccm_encrypt_detached(key: &[u8], nonce: &[u8], data: &mut [u8], mic: &mut [u8]) -> Result<(), Error> {
+    let key = GenericArray::<u8, <Aes128 as NewBlockCipher>::KeySize>::from_slice(key);
+    match mic.len() {
+        4 => {
+            let ccm = AesCcm32bitMac::new(&key);
+            let tag = ccm.encrypt_in_place_detached(nonce.into(), &[], data)?;
+            for (i,b) in mic.iter_mut().enumerate() {
+                *b = tag[i];
+            }
+            Ok(())
+        }
+        8 => {
+            let ccm = AesCcm64bitMac::new(&key);
+            let tag = ccm.encrypt_in_place_detached(nonce.into(), &[], data)?;
+            for (i,b) in mic.iter_mut().enumerate() {
+                *b = tag[i];
+            }
+            Ok(())
         }
         _ => {
             Err(Error)

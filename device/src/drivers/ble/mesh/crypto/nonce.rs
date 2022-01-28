@@ -37,6 +37,7 @@ impl NetworkNonce {
 
 pub struct ApplicationNonce([u8;13]);
 
+#[derive(Copy, Clone)]
 pub struct DeviceNonce([u8;13]);
 
 impl DeviceNonce {

@@ -1,3 +1,4 @@
+use core::convert::TryInto;
 use defmt::Format;
 
 #[derive(Copy, Clone, Format, PartialEq)]
@@ -28,6 +29,15 @@ pub struct UnicastAddress([u8; 2]);
 impl UnicastAddress {
     pub fn as_bytes(&self) -> [u8;2] {
         [ self.0[0], self.0[1] ]
+    }
+}
+
+impl TryInto<UnicastAddress> for u16 {
+    type Error = InvalidAddress;
+
+    fn try_into(self) -> Result<UnicastAddress, Self::Error> {
+        let bytes = self.to_be_bytes();
+        UnicastAddress::parse( [ bytes[0], bytes[1] ] )
     }
 }
 

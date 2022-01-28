@@ -93,6 +93,10 @@ pub trait Vault {
     fn is_local_unicast(&self, addr: &Address) -> bool;
 
     fn decrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
+
+    fn encrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &mut [u8]) -> Result<(), DeviceError>;
+
+    fn primary_unicast_address(&self) -> Option<UnicastAddress>;
 }
 
 pub struct StorageVault<'s, S: GeneralStorage + KeyStorage> {
@@ -236,6 +240,25 @@ impl<'s, S: GeneralStorage + KeyStorage> Vault for StorageVault<'s, S> {
                 .map_err(|_| DeviceError::CryptoError)
         } else {
             Err(DeviceError::CryptoError)
+        }
+    }
+
+    fn encrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &mut [u8]) -> Result<(), DeviceError> {
+        let keys = self.storage.retrieve();
+        if let Some(salt) = keys.provisioning_salt()? {
+            let device_key = self.prdk(&salt)?.into_bytes();
+            crypto::aes_ccm_encrypt_detached(&*device_key, &nonce.into_bytes(), bytes, mic)
+                .map_err(|_| DeviceError::CryptoError)
+        } else {
+            Err(DeviceError::CryptoError)
+        }
+    }
+
+    fn primary_unicast_address(&self) -> Option<UnicastAddress> {
+        if let Some(network) = self.storage.retrieve().network() {
+            network.unicast_address.try_into().ok()
+        } else {
+            None
         }
     }
 }

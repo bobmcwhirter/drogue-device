@@ -2,69 +2,134 @@ use core::convert::TryInto;
 use ccm::aead::Buffer;
 use cmac::NewMac;
 use crate::drivers::ble::mesh::driver::DeviceError;
-use crate::drivers::ble::mesh::pdu::network::AuthenticatedPDU;
+use crate::drivers::ble::mesh::pdu::network::CleartextNetworkPDU;
 use crate::drivers::ble::mesh::pdu::{lower, network, upper};
-use crate::drivers::ble::mesh::pdu::lower::{Access, AccessMessage, ControlMessage, PDU};
+use crate::drivers::ble::mesh::pdu::lower::{LowerAccess, LowerAccessMessage, LowerControlMessage, LowerPDU};
 
 use heapless::Vec;
 use crate::drivers::ble::mesh::crypto::nonce::DeviceNonce;
 use crate::drivers::ble::mesh::driver::pipeline::provisioned::network::authentication::AuthenticationContext;
+use crate::drivers::ble::mesh::pdu::upper::{UpperAccess, UpperPDU};
 
-pub trait LowerContext : AuthenticationContext {
+pub trait LowerContext: AuthenticationContext {
     fn decrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &[u8]) -> Result<(), DeviceError>;
+    fn encrypt_device_key(&self, nonce: DeviceNonce, bytes: &mut [u8], mic: &mut [u8]) -> Result<(), DeviceError>;
 }
 
 pub struct Lower {
-
+    sequence: u32,
 }
 
 impl Default for Lower {
     fn default() -> Self {
         Self {
-
+            sequence: 0,
         }
     }
 }
 
 impl Lower {
-
-    pub async fn process_inbound<C:LowerContext>(&mut self, ctx:&C, pdu: AuthenticatedPDU) -> Result<Option<upper::PDU>, DeviceError> {
+    pub async fn process_inbound<C: LowerContext>(&mut self, ctx: &C, pdu: CleartextNetworkPDU) -> Result<Option<UpperPDU>, DeviceError> {
         match pdu.transport_pdu {
-            PDU::Access(access) => {
+            LowerPDU::Access(access) => {
                 match access.message {
-                    AccessMessage::Unsegmented(payload) => {
+                    LowerAccessMessage::Unsegmented(payload) => {
                         // TransMIC is 32 bits for unsegmented access messages.
-                        let (payload, trans_mic) = payload.split_at( payload.len() - 4);
-                        let mut payload = Vec::from_slice(payload).map_err(|_|DeviceError::InsufficientBuffer)?;
+                        let (payload, trans_mic) = payload.split_at(payload.len() - 4);
+                        let mut payload = Vec::from_slice(payload).map_err(|_| DeviceError::InsufficientBuffer)?;
 
                         if access.akf {
                             // decrypt with aid key
-                        }  else {
+                        } else {
                             // decrypt with device key
                             let nonce = DeviceNonce::new(false, pdu.seq, pdu.src, pdu.dst, ctx.iv_index().ok_or(DeviceError::CryptoError)?);
-                            ctx.decrypt_device_key(nonce, &mut payload, &trans_mic);
+                            ctx.decrypt_device_key(nonce, &mut payload, &trans_mic)?;
                         }
-                        Ok(Some(upper::PDU::Access( upper::Access {
-                            payload,
-                        })))
+                        Ok(Some(UpperPDU::Access(
+                                UpperAccess {
+                                    network_key: pdu.network_key,
+                                    ivi: pdu.ivi,
+                                    nid: pdu.nid,
+                                    akf: access.akf,
+                                    aid: access.aid,
+                                    src: pdu.src,
+                                    dst: pdu.dst,
+                                    payload,
+                                }
+                            )
+                        ))
                     }
-                    AccessMessage::Segmented { .. } => {
+                    LowerAccessMessage::Segmented { .. } => {
                         defmt::info!("segmented access");
                         todo!()
                     }
                 }
             }
-            PDU::Control(control) => {
+            LowerPDU::Control(control) => {
                 match control.message {
-                    ControlMessage::Unsegmented { .. } => {
+                    LowerControlMessage::Unsegmented { .. } => {
                         defmt::info!("unsegmented control");
                         todo!()
                     }
-                    ControlMessage::Segmented { .. } => {
+                    LowerControlMessage::Segmented { .. } => {
                         defmt::info!("segmented control");
                         todo!()
                     }
                 }
+            }
+        }
+    }
+
+    pub async fn process_outbound<C: LowerContext>(&mut self, ctx: &C, pdu: UpperPDU) -> Result<Option<CleartextNetworkPDU>, DeviceError> {
+        // todo: work with segmented
+        match pdu {
+            UpperPDU::Control(control) => Ok(None),
+            UpperPDU::Access(access) => {
+
+                defmt::info!("*** ENCRYPT out {:x}", access.payload);
+                let mut payload = Vec::from_slice(&access.payload).map_err(|_|DeviceError::InsufficientBuffer)?;
+
+                let seq = self.sequence;
+                self.sequence = self.sequence + 1;
+
+                if access.akf {
+                    // encrypt with application key
+                } else {
+                    // encrypt device key
+                    let nonce = DeviceNonce::new(false, seq, access.src, access.dst, ctx.iv_index().ok_or(DeviceError::CryptoError)?);
+                    let mut trans_mic = [0;4];
+                    ctx.encrypt_device_key(nonce, &mut payload, &mut trans_mic)?;
+
+                    let mut check: Vec<u8,15> = Vec::new();
+                    check.extend_from_slice(&payload).ok();
+                    ctx.decrypt_device_key(nonce, &mut check, &trans_mic);
+                    defmt::info!("****** CHECK {:x}", check);
+
+                    payload.extend_from_slice( &trans_mic ).map_err(|_|DeviceError::InsufficientBuffer)?;
+
+                }
+                Ok(
+                    Some(
+                        CleartextNetworkPDU {
+                            network_key: access.network_key,
+                            ivi: access.ivi,
+                            nid: access.nid,
+                            ttl: 127,
+                            seq,
+                            src: access.src,
+                            dst: access.dst,
+                            transport_pdu: lower::LowerPDU::Access(
+                                LowerAccess {
+                                    akf: false,
+                                    aid: 0,
+                                    message: LowerAccessMessage::Unsegmented(
+                                        payload
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+                )
             }
         }
     }

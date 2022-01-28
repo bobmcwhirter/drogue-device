@@ -22,14 +22,6 @@ use p256::EncodedPoint;
 pub trait UnprovisionedContext: MeshContext {
     fn rng_fill(&self, dest: &mut [u8]);
 
-    /*
-    type PeerPublicKeyFuture<'m>: Future<Output = Result<Option<p256::PublicKey>, DeviceError>>
-    where
-        Self: 'm;
-
-    fn peer_public_key<'m>(&'m self) -> Self::PeerPublicKeyFuture<'m>;
-     */
-
     type SetPeerPublicKeyFuture<'m>: Future<Output = Result<(), DeviceError>>
     where
         Self: 'm;

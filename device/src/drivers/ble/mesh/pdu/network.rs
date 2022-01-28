@@ -2,12 +2,14 @@ use core::convert::TryInto;
 use defmt::Format;
 use crate::drivers::ble::mesh::address::{Address, UnicastAddress};
 use crate::drivers::ble::mesh::pdu::{lower, ParseError};
-use crate::drivers::ble::mesh::MESH_MESSAGE;
+use crate::drivers::ble::mesh::{InsufficientBuffer, MESH_MESSAGE};
 use heapless::Vec;
+use crate::drivers::ble::mesh::configuration_manager::NetworkKey;
+use crate::drivers::ble::mesh::pdu::lower::LowerPDU;
 
-pub enum PDU {
-    ObfuscatedAndEncrypted(ObfuscatedAndEncryptedPDU),
-    Authenticated(AuthenticatedPDU),
+pub enum NetworkPDU {
+    ObfuscatedAndEncrypted(ObfuscatedAndEncryptedNetworkPDU),
+    Authenticated(CleartextNetworkPDU),
 }
 
 #[derive(Format)]
@@ -18,14 +20,15 @@ pub enum NetMic {
 
 // todo: format vecs/arrays as hex
 #[derive(Format)]
-pub struct ObfuscatedAndEncryptedPDU {
+pub struct ObfuscatedAndEncryptedNetworkPDU {
     pub(crate) ivi: u8, /* 1 bit */
     pub(crate) nid: u8, /* 7 bits */
     pub(crate) obfuscated: [u8;6],
     pub(crate) encrypted_and_mic: Vec<u8, 28>,
 }
 
-impl ObfuscatedAndEncryptedPDU {
+
+impl ObfuscatedAndEncryptedNetworkPDU {
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         let ivi_nid = data[0];
         let ivi = ivi_nid & 0b10000000 >> 7;
@@ -48,10 +51,19 @@ impl ObfuscatedAndEncryptedPDU {
             encrypted_and_mic,
         })
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        let ivi_nid = ((self.ivi & 0b0000001) << 7) | (self.nid & 0b01111111);
+        xmit.push(ivi_nid).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice(&self.obfuscated).map_err(|_|InsufficientBuffer)?;
+        xmit.extend_from_slice(&self.encrypted_and_mic).map_err(|_|InsufficientBuffer)?;
+        Ok(())
+    }
 }
 
 #[derive(Format)]
-pub struct AuthenticatedPDU {
+pub struct CleartextNetworkPDU {
+    pub(crate) network_key: NetworkKey,
     pub(crate) ivi: u8, /* 1 bit */
     pub(crate) nid: u8, /* 7 bits */
     // ctl: bool /* 1 bit */
@@ -59,11 +71,11 @@ pub struct AuthenticatedPDU {
     pub(crate) seq: u32, /* 24 bits */
     pub(crate) src: UnicastAddress,
     pub(crate) dst: Address,
-    pub(crate) transport_pdu: lower::PDU,
+    pub(crate) transport_pdu: lower::LowerPDU,
     //pub(crate) net_mic: NetMic,
 }
 
-impl AuthenticatedPDU {
+impl CleartextNetworkPDU {
     /*
     pub fn parse(data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 11 {

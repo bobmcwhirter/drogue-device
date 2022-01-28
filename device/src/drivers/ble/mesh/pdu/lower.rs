@@ -1,31 +1,34 @@
+use core::convert::TryInto;
 use defmt::Format;
 use crate::drivers::ble::mesh::app::ApplicationKeyIdentifier;
 use crate::drivers::ble::mesh::pdu::ParseError;
 use heapless::Vec;
+use crate::drivers::ble::mesh::InsufficientBuffer;
+use crate::drivers::ble::mesh::pdu::upper::UpperPDU;
 
 #[derive(Clone, Format)]
-pub enum PDU {
-    Access(Access),
-    Control(Control),
+pub enum LowerPDU {
+    Access(LowerAccess),
+    Control(LowerControl),
 }
 
-impl PDU {
+impl LowerPDU {
     pub fn parse(ctl: bool, data: &[u8]) -> Result<Self, ParseError> {
         if data.len() >= 2 {
             let seg = data[0] & 0b10000000 != 0;
 
             match (ctl, seg) {
                 (true, false) => {
-                    Ok(PDU::Control(Self::parse_unsegmented_control(data)?))
+                    Ok(LowerPDU::Control(Self::parse_unsegmented_control(data)?))
                 }
                 (true, true) => {
-                    Ok(PDU::Control(Self::parse_segmented_control(data)?))
+                    Ok(LowerPDU::Control(Self::parse_segmented_control(data)?))
                 }
                 (false, false) => {
-                    Ok(PDU::Access(Self::parse_unsegmented_access(data)?))
+                    Ok(LowerPDU::Access(Self::parse_unsegmented_access(data)?))
                 }
                 (false, true) => {
-                    Ok(PDU::Access(Self::parse_segmented_access(data)?))
+                    Ok(LowerPDU::Access(Self::parse_segmented_access(data)?))
                 }
             }
         } else {
@@ -33,29 +36,29 @@ impl PDU {
         }
     }
 
-    fn parse_unsegmented_control(data: &[u8]) -> Result<Control, ParseError> {
+    fn parse_unsegmented_control(data: &[u8]) -> Result<LowerControl, ParseError> {
         let opcode = Opcode::parse(data[0] & 0b01111111).ok_or(ParseError::InvalidValue)?;
         let parameters = &data[1..];
         Ok(
-            Control {
+            LowerControl {
                 opcode,
-                message: ControlMessage::Unsegmented {
+                message: LowerControlMessage::Unsegmented {
                     parameters: Vec::from_slice(parameters).map_err(|_| ParseError::InsufficientBuffer)?
                 }
             }
         )
     }
 
-    fn parse_segmented_control(data: &[u8]) -> Result<Control, ParseError> {
+    fn parse_segmented_control(data: &[u8]) -> Result<LowerControl, ParseError> {
         let opcode = Opcode::parse(data[0] & 0b01111111).ok_or(ParseError::InvalidValue)?;
         let seq_zero = u16::from_be_bytes([ data[1] & 0b01111111, data[2] & 0b11111100 ]) >> 2;
         let seg_o = (u16::from_be_bytes( [ data[2] & 0b00000011, data[3] & 0b11100000 ] ) >> 5) as u8;
         let seg_n = data[3] & 0b00011111;
         let segment_m = &data[4..];
         Ok(
-            Control {
+            LowerControl {
                 opcode,
-                message: ControlMessage::Segmented {
+                message: LowerControlMessage::Segmented {
                     seq_zero,
                     seg_o,
                     seg_n,
@@ -65,21 +68,21 @@ impl PDU {
         )
     }
 
-    fn parse_unsegmented_access(data: &[u8]) -> Result<Access, ParseError> {
+    fn parse_unsegmented_access(data: &[u8]) -> Result<LowerAccess, ParseError> {
         let akf = data[0] & 0b01000000 != 0;
         let aid = data[0] & 0b00111111;
         Ok(
-            Access {
+            LowerAccess {
                 akf,
                 aid,
-                message: AccessMessage::Unsegmented(
+                message: LowerAccessMessage::Unsegmented(
                     Vec::from_slice(&data[1..]).map_err(|_|ParseError::InsufficientBuffer)?
                 )
             }
         )
     }
 
-    fn parse_segmented_access(data: &[u8]) -> Result<Access, ParseError> {
+    fn parse_segmented_access(data: &[u8]) -> Result<LowerAccess, ParseError> {
         let akf = data[0] & 0b01000000 != 0;
         let aid = data[0] & 0b00111111;
         let szmic = SzMic::parse(data[1] & 0b1000000);
@@ -89,10 +92,10 @@ impl PDU {
         let segment_m = &data[4..];
         
         Ok(
-            Access {
+            LowerAccess {
                 akf,
                 aid,
-                message: AccessMessage::Segmented {
+                message: LowerAccessMessage::Segmented {
                     szmic,
                     seq_zero,
                     seg_o,
@@ -102,19 +105,59 @@ impl PDU {
             }
         )
     }
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        match self {
+            LowerPDU::Access(inner) => inner.emit(xmit),
+            LowerPDU::Control(inner) => inner.emit(xmit),
+        }
+    }
 }
 
 #[derive(Clone, Format)]
-pub struct Access {
+pub struct LowerAccess {
     pub(crate) akf: bool,
     pub(crate) aid: ApplicationKeyIdentifier,
-    pub(crate) message: AccessMessage,
+    pub(crate) message: LowerAccessMessage,
+}
+
+impl LowerAccess {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+
+        let seg_akf_aid = match self.message {
+            LowerAccessMessage::Unsegmented(_) =>  {
+                if self.akf {
+                    self.aid | 0b01000000
+                } else {
+                    self.aid
+                }
+            }
+            LowerAccessMessage::Segmented { .. } => {
+                if self.akf {
+                    self.aid | 0b11000000
+                } else {
+                    self.aid | 0b10000000
+                }
+            }
+        };
+        xmit.push( seg_akf_aid ).map_err(|_|InsufficientBuffer)?;
+        self.message.emit(xmit)
+    }
+
 }
 
 #[derive(Clone, Format)]
-pub struct Control {
+pub struct LowerControl {
     pub(crate) opcode: Opcode,
-    pub(crate) message: ControlMessage,
+    pub(crate) message: LowerControlMessage,
+}
+
+impl LowerControl {
+
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        todo!()
+    }
+
 }
 
 #[derive(Copy, Clone, Format)]
@@ -134,7 +177,7 @@ impl SzMic {
 }
 
 #[derive(Clone, Format)]
-pub enum AccessMessage {
+pub enum LowerAccessMessage {
     Unsegmented(Vec<u8, 15>),
     Segmented {
         szmic: SzMic,
@@ -145,8 +188,23 @@ pub enum AccessMessage {
     },
 }
 
+impl LowerAccessMessage {
+    pub fn emit<const N: usize>(&self, xmit: &mut Vec<u8, N>) -> Result<(), InsufficientBuffer> {
+        match self {
+            LowerAccessMessage::Unsegmented(inner) => {
+                xmit.extend_from_slice(&inner).map_err(|_|InsufficientBuffer)
+            }
+            LowerAccessMessage::Segmented { .. } => {
+                todo!()
+            }
+        }
+
+    }
+
+}
+
 #[derive(Clone, Format)]
-pub enum ControlMessage {
+pub enum LowerControlMessage {
     Unsegmented {
         parameters: Vec<u8, 11>,
     },

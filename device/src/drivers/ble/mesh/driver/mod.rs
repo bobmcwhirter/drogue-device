@@ -26,6 +26,7 @@ pub enum DeviceError {
     Serialization,
     InvalidSrcAddress,
     InvalidState,
+    NotProvisioned,
 }
 
 impl From<InvalidKeyLength> for DeviceError {
